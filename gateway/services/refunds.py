@@ -1,0 +1,316 @@
+"""
+退款服务层
+"""
+
+import uuid
+from datetime import datetime, UTC
+
+import structlog
+from sqlalchemy import select, func
+from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import HTTPException
+
+from gateway.core.models import Payment, Refund
+from gateway.core.exceptions import NotFoundException
+from gateway.core.constants import PaymentStatus, RefundStatus, Provider
+from gateway.core.schemas import CreateRefundRequest
+
+logger = structlog.get_logger(__name__)
+
+
+class RefundService:
+    """退款服务"""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def create_refund(
+        self,
+        req: CreateRefundRequest,
+    ) -> Refund:
+        """
+        创建退款
+
+        业务规则：
+        1. 支付必须是成功状态（succeeded）
+        2. 如果不指定退款金额，则为全额退款
+        3. 部分退款时，累计退款金额不能超过支付金额
+        4. 调用支付渠道的退款接口
+        """
+        log = logger.bind(
+            payment_id=str(req.payment_id),
+            refund_amount=req.refund_amount,
+        )
+        log.info("create_refund_request")
+
+        # 1. 查询支付记录
+        stmt = select(Payment).where(Payment.id == req.payment_id)
+        result = await self.session.execute(stmt)
+        payment = result.scalar_one_or_none()
+
+        if not payment:
+            log.warning("payment_not_found")
+            raise NotFoundException(f"Payment {req.payment_id} not found")
+
+        # 2. 检查支付状态（必须是成功状态）
+        if payment.status != PaymentStatus.succeeded:
+            log.warning("payment_not_succeeded", status=payment.status.value)
+            raise HTTPException(
+                status_code=400,
+                detail=f"Payment status must be 'succeeded', got '{payment.status.value}'",
+            )
+
+        # 3. 计算退款金额
+        refund_amount = req.refund_amount
+        if refund_amount is None:
+            # 全额退款
+            refund_amount = payment.amount
+            log.info("full_refund", amount=refund_amount)
+        else:
+            # 部分退款，检查金额是否有效
+            if refund_amount > payment.amount:
+                log.warning(
+                    "refund_amount_exceeds_payment",
+                    refund_amount=refund_amount,
+                    payment_amount=payment.amount,
+                )
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Refund amount {refund_amount} exceeds payment amount {payment.amount}",
+                )
+
+        # 4. 检查累计退款金额
+        stmt = select(func.sum(Refund.refund_amount)).where(
+            Refund.payment_id == payment.id,
+            Refund.status.in_([RefundStatus.pending, RefundStatus.succeeded]),
+        )
+        result = await self.session.execute(stmt)
+        total_refunded = result.scalar() or 0
+
+        if total_refunded + refund_amount > payment.amount:
+            log.warning(
+                "total_refund_exceeds_payment",
+                total_refunded=total_refunded,
+                new_refund=refund_amount,
+                payment_amount=payment.amount,
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=f"Total refund amount {total_refunded + refund_amount} would exceed payment amount {payment.amount}",
+            )
+
+        # 5. 调用支付渠道退款接口
+        provider_refund_id = None
+        refund_status = RefundStatus.pending
+
+        try:
+            if payment.provider == Provider.stripe:
+                from gateway.providers.stripe import get_stripe_adapter
+
+                stripe_adapter = get_stripe_adapter()
+
+                refund_result = await stripe_adapter.create_refund(
+                    payment_intent_id=payment.provider_txn_id,
+                    refund_amount=refund_amount,
+                    reason=req.reason,
+                )
+
+                provider_refund_id = refund_result["refund_id"]
+
+                # Stripe 退款状态映射
+                stripe_status = refund_result["status"]
+                if stripe_status == "succeeded":
+                    refund_status = RefundStatus.succeeded
+                elif stripe_status == "failed":
+                    refund_status = RefundStatus.failed
+                else:
+                    refund_status = RefundStatus.pending
+
+                log.info(
+                    "stripe_refund_created",
+                    provider_refund_id=provider_refund_id,
+                    status=stripe_status,
+                )
+
+            elif payment.provider == Provider.alipay:
+                # TODO: 实现支付宝退款
+                log.warning("alipay_refund_not_implemented")
+                raise HTTPException(
+                    status_code=501, detail="Alipay refund not implemented yet"
+                )
+
+            elif payment.provider == Provider.wechatpay:
+                # TODO: 实现微信支付退款
+                log.warning("wechatpay_refund_not_implemented")
+                raise HTTPException(
+                    status_code=501, detail="WeChat Pay refund not implemented yet"
+                )
+
+            else:
+                log.error("unsupported_provider", provider=payment.provider.value)
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Unsupported provider: {payment.provider.value}",
+                )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            log.error("refund_creation_failed", error=str(e))
+            raise HTTPException(
+                status_code=500, detail=f"Failed to create refund: {str(e)}"
+            )
+
+        # 6. 创建退款记录
+        refund = Refund(
+            payment_id=payment.id,
+            refund_amount=refund_amount,
+            reason=req.reason,
+            status=refund_status,
+            provider=payment.provider,
+            provider_refund_id=provider_refund_id,
+            refunded_at=(
+                datetime.now(UTC) if refund_status == RefundStatus.succeeded else None
+            ),
+        )
+
+        self.session.add(refund)
+        await self.session.commit()
+        await self.session.refresh(refund)
+
+        log.info("refund_created", refund_id=str(refund.id), status=refund.status.value)
+
+        return refund
+
+    async def get_refund(self, refund_id: uuid.UUID) -> Refund:
+        """查询退款详情"""
+        log = logger.bind(refund_id=str(refund_id))
+        log.info("get_refund_request")
+
+        stmt = select(Refund).where(Refund.id == refund_id)
+        result = await self.session.execute(stmt)
+        refund = result.scalar_one_or_none()
+
+        if not refund:
+            log.warning("refund_not_found")
+            raise NotFoundException(f"Refund {refund_id} not found")
+
+        log.info("refund_found", status=refund.status.value)
+        return refund
+
+    async def list_refunds_by_payment(
+        self,
+        payment_id: uuid.UUID,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> tuple[list[Refund], int]:
+        """查询支付的所有退款记录"""
+        log = logger.bind(payment_id=str(payment_id))
+        log.info("list_refunds_request", skip=skip, limit=limit)
+
+        # 查询总数
+        count_stmt = (
+            select(func.count())
+            .select_from(Refund)
+            .where(Refund.payment_id == payment_id)
+        )
+        total_result = await self.session.execute(count_stmt)
+        total = total_result.scalar() or 0
+
+        # 查询列表
+        stmt = (
+            select(Refund)
+            .where(Refund.payment_id == payment_id)
+            .order_by(Refund.created_at.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        refunds = list(result.scalars().all())
+
+        log.info("refunds_found", total=total, returned=len(refunds))
+        return refunds, total
+
+    async def sync_refund_status(self, refund_id: uuid.UUID) -> Refund:
+        """
+        同步退款状态（从支付渠道）
+
+        用于查询渠道侧的退款状态并更新本地记录
+        """
+        log = logger.bind(refund_id=str(refund_id))
+        log.info("sync_refund_status_request")
+
+        # 1. 查询退款记录
+        stmt = select(Refund).where(Refund.id == refund_id)
+        result = await self.session.execute(stmt)
+        refund = result.scalar_one_or_none()
+
+        if not refund:
+            log.warning("refund_not_found")
+            raise NotFoundException(f"Refund {refund_id} not found")
+
+        # 2. 如果已经是最终状态，无需同步
+        if refund.status in [
+            RefundStatus.succeeded,
+            RefundStatus.failed,
+            RefundStatus.canceled,
+        ]:
+            log.info("refund_already_final", status=refund.status.value)
+            return refund
+
+        # 3. 从支付渠道查询状态
+        if not refund.provider_refund_id:
+            log.warning("no_provider_refund_id")
+            raise HTTPException(
+                status_code=400, detail="Refund does not have provider_refund_id"
+            )
+
+        try:
+            if refund.provider == Provider.stripe:
+                from gateway.providers.stripe import get_stripe_adapter
+
+                stripe_adapter = get_stripe_adapter()
+
+                refund_result = await stripe_adapter.get_refund(
+                    refund.provider_refund_id
+                )
+
+                # 更新状态
+                stripe_status = refund_result["status"]
+                old_status = refund.status
+
+                if stripe_status == "succeeded":
+                    refund.status = RefundStatus.succeeded
+                    refund.refunded_at = datetime.now(UTC)
+                elif stripe_status == "failed":
+                    refund.status = RefundStatus.failed
+                elif stripe_status == "canceled":
+                    refund.status = RefundStatus.canceled
+
+                if refund.status != old_status:
+                    await self.session.commit()
+                    await self.session.refresh(refund)
+                    log.info(
+                        "refund_status_updated",
+                        old_status=old_status.value,
+                        new_status=refund.status.value,
+                    )
+                else:
+                    log.info("refund_status_unchanged", status=refund.status.value)
+
+            else:
+                log.warning("provider_not_supported", provider=refund.provider.value)
+                raise HTTPException(
+                    status_code=501,
+                    detail=f"Provider {refund.provider.value} not supported for status sync",
+                )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            log.error("sync_failed", error=str(e))
+            raise HTTPException(
+                status_code=500, detail=f"Failed to sync refund status: {str(e)}"
+            )
+
+        return refund

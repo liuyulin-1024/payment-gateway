@@ -1,0 +1,166 @@
+"""
+支付服务层（创建/查询/状态机推进）
+"""
+
+import uuid
+from datetime import datetime, UTC
+
+import structlog
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
+from fastapi import HTTPException
+
+from gateway.core.models import App, Payment
+from gateway.core.constants import PaymentStatus
+from gateway.core.exceptions import NotFoundException
+from gateway.core.schemas import CreatePaymentRequest
+
+logger = structlog.get_logger(__name__)
+
+
+class PaymentService:
+    """支付服务"""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def create_or_get_payment(
+        self,
+        app: App,
+        req: CreatePaymentRequest,
+        idempotency_key: str | None = None,
+    ) -> tuple[Payment, bool]:
+        """
+        创建或获取支付（弱幂等：以 merchant_order_no 为准）
+
+        返回：(Payment, is_new: bool)
+
+        冲突规则：
+        - 若同一 merchant_order_no 已存在，检查关键字段（amount/currency/provider）
+        - 若不一致，返回 409
+        - 若一致，返回已有 Payment
+        """
+        log = logger.bind(
+            app_id=str(app.id),
+            merchant_order_no=req.merchant_order_no,
+            provider=req.provider.value,
+            idempotency_key=idempotency_key,
+        )
+
+        # 尝试查找已有订单
+        stmt = select(Payment).where(
+            Payment.app_id == app.id,
+            Payment.merchant_order_no == req.merchant_order_no,
+        )
+        result = await self.session.execute(stmt)
+        existing = result.scalar_one_or_none()
+
+        if existing:
+            # 幂等检查：验证关键字段是否一致
+            if (
+                existing.amount != req.amount
+                or existing.currency != req.currency
+                or existing.provider != req.provider
+            ):
+                log.warning(
+                    "payment_idempotency_conflict",
+                    existing_amount=existing.amount,
+                    existing_currency=existing.currency.value,
+                    existing_provider=existing.provider.value,
+                    request_amount=req.amount,
+                    request_currency=req.currency.value,
+                    request_provider=req.provider.value,
+                )
+                raise HTTPException(
+                    status_code=409,
+                    detail="Payment with this merchant_order_no exists with different parameters",
+                )
+
+            log.info("payment_idempotent_return", payment_id=str(existing.id))
+            return existing, False
+
+        # 创建新支付
+        payment = Payment(
+            id=uuid.uuid4(),
+            app_id=app.id,
+            merchant_order_no=req.merchant_order_no,
+            provider=req.provider,
+            amount=req.amount,
+            currency=req.currency,
+            status=PaymentStatus.created,
+            notify_url=req.notify_url or app.notify_url,
+            provider_txn_id=None,
+        )
+
+        self.session.add(payment)
+
+        try:
+            await self.session.flush()
+            log.info("payment_created", payment_id=str(payment.id))
+            return payment, True
+        except IntegrityError as exc:
+            # 并发创建冲突（理论上应该被前面的 select 捕获，但保险起见）
+            await self.session.rollback()
+            log.warning("payment_creation_race_condition", error=str(exc))
+            raise HTTPException(
+                status_code=409,
+                detail="Payment creation race condition",
+            )
+
+    async def get_payment_by_id(self, app: App, payment_id: uuid.UUID) -> Payment:
+        """按 payment_id 查询支付（需验证归属）"""
+        stmt = select(Payment).where(
+            Payment.id == payment_id,
+            Payment.app_id == app.id,
+        )
+        result = await self.session.execute(stmt)
+        payment = result.scalar_one_or_none()
+
+        if payment is None:
+            raise NotFoundException("Payment not found")
+
+        return payment
+
+    async def get_payment_by_merchant_order_no(
+        self, app: App, merchant_order_no: str
+    ) -> Payment:
+        """按 merchant_order_no 查询支付"""
+        stmt = select(Payment).where(
+            Payment.app_id == app.id,
+            Payment.merchant_order_no == merchant_order_no,
+        )
+        result = await self.session.execute(stmt)
+        payment = result.scalar_one_or_none()
+
+        if payment is None:
+            raise HTTPException(status_code=404, detail="Payment not found")
+
+        return payment
+
+    async def update_payment_status(
+        self,
+        payment: Payment,
+        new_status: PaymentStatus,
+        provider_txn_id: str | None = None,
+    ):
+        """
+        更新支付状态（状态机推进）
+
+        注意：调用者应在事务内调用，并负责 commit
+        """
+        log = logger.bind(
+            payment_id=str(payment.id),
+            old_status=payment.status.value,
+            new_status=new_status.value,
+        )
+
+        payment.status = new_status
+
+        if provider_txn_id and not payment.provider_txn_id:
+            payment.provider_txn_id = provider_txn_id
+
+        if new_status == PaymentStatus.succeeded and not payment.paid_at:
+            payment.paid_at = datetime.now(UTC)
+
+        log.info("payment_status_updated")
