@@ -19,6 +19,7 @@ from gateway.core.schemas import (
     CreatePaymentResponse,
     PaymentResponse,
 )
+from gateway.core.responses import success_response
 
 
 logger = structlog.get_logger(__name__)
@@ -30,7 +31,7 @@ router = APIRouter()
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
-@router.post("/payments", response_model=CreatePaymentResponse)
+@router.post("/payments")
 async def create_payment(
     req: CreatePaymentRequest,
     app: App = Depends(get_app_from_api_key),
@@ -93,28 +94,30 @@ async def create_payment(
             type=result.type.value,
         )
 
-        return CreatePaymentResponse(
+        response_data = CreatePaymentResponse(
             payment_id=payment.id,
             merchant_order_no=payment.merchant_order_no,
             status=payment.status,
             type=result.type,
             payload=result.payload,
         )
+        return success_response(data=response_data.model_dump(mode='json'), msg="创建支付成功")
     else:
         # 幂等返回：需要重新生成 payload（简化：返回空 payload）
         log.info("create_payment_idempotent", payment_id=str(payment.id))
 
         # TODO: 从 payment 状态恢复 type/payload（v1 简化为返回空）
-        return CreatePaymentResponse(
+        response_data = CreatePaymentResponse(
             payment_id=payment.id,
             merchant_order_no=payment.merchant_order_no,
             status=payment.status,
             type="redirect",  # 占位
             payload={"message": "Payment already exists"},
         )
+        return success_response(data=response_data.model_dump(mode='json'), msg="支付已存在（幂等返回）")
 
 
-@router.get("/payments/{payment_id}", response_model=PaymentResponse)
+@router.get("/payments/{payment_id}")
 async def get_payment_by_id(
     payment_id: uuid.UUID,
     app: App = Depends(get_app_from_api_key),
@@ -128,12 +131,11 @@ async def get_payment_by_id(
     """
     payment_service = PaymentService(session)
     payment = await payment_service.get_payment_by_id(app, payment_id)
-    return PaymentResponse.model_validate(payment)
+    response_data = PaymentResponse.model_validate(payment)
+    return success_response(data=response_data.model_dump(mode='json'), msg="查询成功")
 
 
-@router.get(
-    "/payments/by-merchant-order/{merchant_order_no}", response_model=PaymentResponse
-)
+@router.get("/payments/by-merchant-order/{merchant_order_no}")
 async def get_payment_by_merchant_order_no(
     merchant_order_no: str,
     app: App = Depends(get_app_from_api_key),
@@ -149,4 +151,5 @@ async def get_payment_by_merchant_order_no(
     payment = await payment_service.get_payment_by_merchant_order_no(
         app, merchant_order_no
     )
-    return PaymentResponse.model_validate(payment)
+    response_data = PaymentResponse.model_validate(payment)
+    return success_response(data=response_data.model_dump(mode='json'), msg="查询成功")

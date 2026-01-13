@@ -5,12 +5,12 @@
 import secrets
 import uuid
 import structlog
-from fastapi import HTTPException
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.models import App
 from gateway.core.schemas import CreateAppRequest
+from gateway.core.exceptions import NotFoundException, BadRequestException, InternalServerException
 
 logger = structlog.get_logger(__name__)
 
@@ -52,9 +52,10 @@ class AppService:
 
         if existing_app:
             log.warning("app_name_already_exists")
-            raise HTTPException(
-                status_code=400,
-                detail=f"Application with name '{req.name}' already exists",
+            raise BadRequestException(
+                message=f"应用名称 '{req.name}' 已存在",
+                code=4008,
+                details={"name": req.name}
             )
 
         # 生成唯一的 API Key
@@ -71,9 +72,9 @@ class AppService:
 
         if api_key is None:
             log.error("failed_to_generate_unique_api_key")
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to generate unique API key",
+            raise InternalServerException(
+                message="生成唯一的 API Key 失败",
+                code=5004,
             )
 
         # 创建应用
@@ -134,9 +135,10 @@ class AppService:
         app = result.scalar_one_or_none()
 
         if app is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Application with ID {app_id} not found",
+            raise NotFoundException(
+                message="应用不存在",
+                code=4047,
+                details={"app_id": str(app_id)}
             )
 
         return app

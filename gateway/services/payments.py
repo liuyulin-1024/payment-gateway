@@ -9,11 +9,10 @@ import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
-from fastapi import HTTPException
 
 from gateway.core.models import App, Payment
 from gateway.core.constants import PaymentStatus
-from gateway.core.exceptions import NotFoundException
+from gateway.core.exceptions import NotFoundException, ConflictException
 from gateway.core.schemas import CreatePaymentRequest
 
 logger = structlog.get_logger(__name__)
@@ -75,9 +74,22 @@ class PaymentService:
                     request_currency=req.currency.value,
                     request_provider=req.provider.value,
                 )
-                raise HTTPException(
-                    status_code=409,
-                    detail="Payment with this merchant_order_no exists with different parameters",
+                raise ConflictException(
+                    message="该商户订单号已存在，但关键参数不一致",
+                    code=4091,
+                    details={
+                        "merchant_order_no": req.merchant_order_no,
+                        "existing": {
+                            "amount": existing.amount,
+                            "currency": existing.currency.value,
+                            "provider": existing.provider.value,
+                        },
+                        "request": {
+                            "amount": request_total_amount,
+                            "currency": req.currency.value,
+                            "provider": req.provider.value,
+                        }
+                    }
                 )
 
             log.info("payment_idempotent_return", payment_id=str(existing.id))
@@ -109,9 +121,10 @@ class PaymentService:
             # 并发创建冲突（理论上应该被前面的 select 捕获，但保险起见）
             await self.session.rollback()
             log.warning("payment_creation_race_condition", error=str(exc))
-            raise HTTPException(
-                status_code=409,
-                detail="Payment creation race condition",
+            raise ConflictException(
+                message="支付创建并发冲突，请重试",
+                code=4092,
+                details={"error": str(exc)}
             )
 
     async def get_payment_by_id(self, app: App, payment_id: uuid.UUID) -> Payment:
@@ -124,7 +137,11 @@ class PaymentService:
         payment = result.scalar_one_or_none()
 
         if payment is None:
-            raise NotFoundException("Payment not found")
+            raise NotFoundException(
+                message="支付记录不存在",
+                code=4041,
+                details={"payment_id": str(payment_id)}
+            )
 
         return payment
 
@@ -140,7 +157,11 @@ class PaymentService:
         payment = result.scalar_one_or_none()
 
         if payment is None:
-            raise HTTPException(status_code=404, detail="Payment not found")
+            raise NotFoundException(
+                message="支付记录不存在",
+                code=4042,
+                details={"merchant_order_no": merchant_order_no}
+            )
 
         return payment
 

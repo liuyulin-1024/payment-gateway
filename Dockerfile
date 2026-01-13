@@ -27,6 +27,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     # 让运行时直接使用 builder 生成的虚拟环境
     PATH="/app/.venv/bin:$PATH"
 
+# 安装 vim 等工具
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends vim && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
 # 创建非 root 用户运行服务
 RUN useradd --create-home --shell /usr/sbin/nologin appuser
 

@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     db_echo: bool = False
     db_pool_size: int = 5
     db_max_overflow: int = 10
+    need_reset_database: bool = False  # 是否强制重置数据库表
 
     # 支付配置（所有支付提供商配置均为可选）
     ## stripe
@@ -41,6 +42,7 @@ class Settings(BaseSettings):
     alipay_sandbox: bool = False
 
     # 应用配置
+    debug: bool = False  # 调试模式（开发环境设为 True）
     log_level: str = "INFO"
     payment_expire_minutes_default: int = Field(default=30, ge=1, le=24 * 60)
 

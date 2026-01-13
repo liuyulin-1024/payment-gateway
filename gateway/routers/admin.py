@@ -4,7 +4,7 @@
 
 import uuid
 import structlog
-from fastapi import APIRouter, Depends, Query, Body, HTTPException
+from fastapi import APIRouter, Depends, Query, Body
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,16 +19,18 @@ from gateway.core.schemas import (
     RefundResponse,
     RefundListResponse,
 )
+from gateway.core.responses import success_response
 from gateway.services.callbacks import CallbackService
 from gateway.core.constants import PaymentStatus, Provider
 from gateway.core.schemas import CreateAppRequest, AppResponse, AppListResponse
+from gateway.core.exceptions import NotFoundException, BadRequestException, InternalServerException
 
 logger = structlog.get_logger(__name__)
 
 router = APIRouter()
 
 
-@router.post("/apps", response_model=AppResponse, status_code=201)
+@router.post("/apps", status_code=201)
 async def create_app(
     req: CreateAppRequest,
     session: AsyncSession = Depends(get_session),
@@ -50,10 +52,11 @@ async def create_app(
     app = await app_service.create_app(req)
 
     log.info("create_app_success", app_id=str(app.id))
-    return AppResponse.model_validate(app)
+    response_data = AppResponse.model_validate(app)
+    return success_response(data=response_data.model_dump(mode='json'), msg="应用创建成功", status_code=201)
 
 
-@router.get("/apps", response_model=AppListResponse)
+@router.get("/apps")
 async def list_apps(
     skip: int = Query(0, ge=0, description="跳过的记录数"),
     limit: int = Query(100, ge=1, le=1000, description="返回的最大记录数"),
@@ -73,12 +76,13 @@ async def list_apps(
     apps, total = await app_service.list_apps(skip=skip, limit=limit)
 
     logger.info("list_apps_success", total=total, returned=len(apps))
-    return AppListResponse(
+    response_data = AppListResponse(
         total=total, items=[AppResponse.model_validate(app) for app in apps]
     )
+    return success_response(data=response_data.model_dump(mode='json'), msg="查询成功")
 
 
-@router.get("/apps/{app_id}", response_model=AppResponse)
+@router.get("/apps/{app_id}")
 async def get_app(
     app_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
@@ -94,10 +98,11 @@ async def get_app(
     app = await app_service.get_app_by_id(app_id)
 
     logger.info("get_app_success", app_id=str(app_id))
-    return AppResponse.model_validate(app)
+    response_data = AppResponse.model_validate(app)
+    return success_response(data=response_data.model_dump(mode='json'), msg="查询成功")
 
 
-@router.delete("/apps/{app_id}", status_code=204)
+@router.delete("/apps/{app_id}")
 async def delete_app(
     app_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
@@ -113,9 +118,10 @@ async def delete_app(
     await app_service.delete_app(app_id)
 
     logger.info("delete_app_success", app_id=str(app_id))
+    return success_response(msg="应用删除成功")
 
 
-@router.patch("/apps/{app_id}/status", response_model=AppResponse)
+@router.patch("/apps/{app_id}/status")
 async def update_app_status(
     app_id: uuid.UUID,
     is_active: bool = Query(..., description="是否启用应用"),
@@ -134,7 +140,8 @@ async def update_app_status(
     app = await app_service.update_app_status(app_id, is_active)
 
     logger.info("update_app_status_success", app_id=str(app_id), is_active=is_active)
-    return AppResponse.model_validate(app)
+    response_data = AppResponse.model_validate(app)
+    return success_response(data=response_data.model_dump(mode='json'), msg="应用状态更新成功")
 
 
 @router.post("/payments/{payment_id}/test-success", summary="模拟支付成功")
@@ -178,18 +185,23 @@ async def test_payment_success(
 
     if not payment:
         log.warning("payment_not_found")
-        raise HTTPException(status_code=404, detail="Payment not found")
+        raise NotFoundException(
+            message="支付记录不存在",
+            code=4046,
+            details={"payment_id": str(payment_id)}
+        )
 
     # 2. 检查当前状态
     if payment.status == PaymentStatus.succeeded:
         log.info("payment_already_succeeded")
-        return {
-            "success": True,
-            "message": "Payment already succeeded",
-            "payment_id": str(payment.id),
-            "status": payment.status.value,
-            "paid_at": payment.paid_at.isoformat() if payment.paid_at else None,
-        }
+        return success_response(
+            data={
+                "payment_id": str(payment.id),
+                "status": payment.status.value,
+                "paid_at": payment.paid_at.isoformat() if payment.paid_at else None,
+            },
+            msg="支付已经成功"
+        )
 
     # 3. 检查支付渠道
     match provider:
@@ -201,9 +213,10 @@ async def test_payment_success(
                     "payment_missing_provider_txn_id", payment_id=str(payment_id)
                 )
                 # 如果没有 provider_txn_id，无法在 Stripe 侧操作
-                raise HTTPException(
-                    status_code=400,
-                    detail="Payment does not have provider_txn_id, cannot test on Stripe",
+                raise BadRequestException(
+                    message="支付记录缺少渠道交易ID，无法在Stripe测试",
+                    code=4006,
+                    details={"payment_id": str(payment_id)}
                 )
             from gateway.providers.stripe import get_stripe_adapter
 
@@ -211,9 +224,10 @@ async def test_payment_success(
 
         case _:
             log.warning("unsupported_provider", provider=payment.provider.value)
-            raise HTTPException(
-                status_code=400,
-                detail=f"Test endpoint only supports Stripe, got {payment.provider.value}",
+            raise BadRequestException(
+                message=f"测试接口仅支持 Stripe，当前为 {payment.provider.value}",
+                code=4007,
+                details={"provider": payment.provider.value}
             )
 
     # 6. 构造标准化的 CallbackEvent（基于真实的 Stripe 状态）
@@ -251,8 +265,10 @@ async def test_payment_success(
         log.info("callback_processed_successfully")
     except Exception as e:
         log.error("callback_processing_failed", error=str(e))
-        raise HTTPException(
-            status_code=500, detail=f"Failed to process callback: {str(e)}"
+        raise InternalServerException(
+            message="回调处理失败",
+            code=5003,
+            details={"error": str(e)}
         )
 
     # 8. 刷新支付记录以获取最新状态
@@ -264,25 +280,26 @@ async def test_payment_success(
         paid_at=payment.paid_at.isoformat() if payment.paid_at else None,
     )
 
-    return {
-        "success": True,
-        "message": "Payment test success completed",
-        "payment_id": str(payment.id),
-        "merchant_order_no": payment.merchant_order_no,
-        "status": payment.status.value,
-        "amount": payment.amount,
-        "currency": payment.currency.value,
-        "provider_txn_id": payment.provider_txn_id,
-        "paid_at": payment.paid_at.isoformat() if payment.paid_at else None,
-        "test_mode": True,
-    }
+    return success_response(
+        data={
+            "payment_id": str(payment.id),
+            "merchant_order_no": payment.merchant_order_no,
+            "status": payment.status.value,
+            "amount": payment.amount,
+            "currency": payment.currency.value,
+            "provider_txn_id": payment.provider_txn_id,
+            "paid_at": payment.paid_at.isoformat() if payment.paid_at else None,
+            "test_mode": True,
+        },
+        msg="支付测试成功"
+    )
 
 
 # ===== 退款管理 API =====
 
 
 @router.post(
-    "/refunds", response_model=RefundResponse, status_code=201, summary="创建退款"
+    "/refunds", status_code=201, summary="创建退款"
 )
 async def create_refund(
     req: CreateRefundRequest,
@@ -339,11 +356,12 @@ async def create_refund(
     refund = await refund_service.create_refund(req)
 
     log.info("create_refund_success", refund_id=str(refund.id))
-    return RefundResponse.model_validate(refund)
+    response_data = RefundResponse.model_validate(refund)
+    return success_response(data=response_data.model_dump(mode='json'), msg="退款创建成功", status_code=201)
 
 
 @router.get(
-    "/refunds/{refund_id}", response_model=RefundResponse, summary="查询退款详情"
+    "/refunds/{refund_id}", summary="查询退款详情"
 )
 async def get_refund(
     refund_id: uuid.UUID,
@@ -366,12 +384,12 @@ async def get_refund(
     refund = await refund_service.get_refund(refund_id)
 
     logger.info("get_refund_success", refund_id=str(refund_id))
-    return RefundResponse.model_validate(refund)
+    response_data = RefundResponse.model_validate(refund)
+    return success_response(data=response_data.model_dump(mode='json'), msg="查询成功")
 
 
 @router.get(
     "/payments/{payment_id}/refunds",
-    response_model=RefundListResponse,
     summary="查询支付的退款记录",
 )
 async def list_refunds_by_payment(
@@ -405,13 +423,14 @@ async def list_refunds_by_payment(
     )
 
     logger.info("list_refunds_success", total=total, returned=len(refunds))
-    return RefundListResponse(
+    response_data = RefundListResponse(
         total=total, items=[RefundResponse.model_validate(refund) for refund in refunds]
     )
+    return success_response(data=response_data.model_dump(mode='json'), msg="查询成功")
 
 
 @router.post(
-    "/refunds/{refund_id}/sync", response_model=RefundResponse, summary="同步退款状态"
+    "/refunds/{refund_id}/sync", summary="同步退款状态"
 )
 async def sync_refund_status(
     refund_id: uuid.UUID,
@@ -448,4 +467,5 @@ async def sync_refund_status(
         refund_id=str(refund_id),
         status=refund.status.value,
     )
-    return RefundResponse.model_validate(refund)
+    response_data = RefundResponse.model_validate(refund)
+    return success_response(data=response_data.model_dump(mode='json'), msg="状态同步成功")
