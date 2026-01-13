@@ -1,37 +1,44 @@
-# syntax=docker/dockerfile:1
-FROM python:3.12-slim AS base
+FROM python:3.12-slim AS builder
 
-# 安装 uv（快速 Python 包管理器）
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
-
-# 设置工作目录
 WORKDIR /app
 
-# 环境变量：Python 不生成 .pyc 文件，输出不缓冲
-ENV TZ=Asia/Shanghai \
-    PYTHONDONTWRITEBYTECODE=1 \
+ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    UV_PROJECT_ENVIRONMENT=/app/.venv \
-    UV_LINK_MODE=copy
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1
 
-# 安装 tzdata 并设置时区
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends tzdata && \
-    ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
-    echo "Asia/Shanghai" > /etc/timezone && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+# uv 用于根据 uv.lock 安装依赖（项目使用 uv 作为依赖管理器）
+RUN python -m pip install --upgrade pip && \
+    python -m pip install uv
 
-COPY pyproject.toml /app/pyproject.toml
+# 先复制依赖清单以利用 Docker layer cache
+COPY pyproject.toml uv.lock ./
 
-# 安装依赖
-RUN uv sync --no-dev
+# 安装运行时依赖到项目虚拟环境（.venv）
+RUN uv sync --frozen --no-dev
 
-# 复制应用代码
-COPY gateway /app/gateway
 
-# 暴露端口
+FROM python:3.12-slim AS runtime
+
+WORKDIR /app
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    # 让运行时直接使用 builder 生成的虚拟环境
+    PATH="/app/.venv/bin:$PATH"
+
+# 创建非 root 用户运行服务
+RUN useradd --create-home --shell /usr/sbin/nologin appuser
+
+# 拷贝虚拟环境与应用代码
+COPY --from=builder /app/.venv /app/.venv
+COPY . /app
+
+# FastAPI 默认端口
 EXPOSE 8000
 
-# 默认命令
-CMD ["uv", "run", "uvicorn", "gateway.main:app", "--host", "0.0.0.0", "--port", "8000"]
+USER appuser
+
+# 默认启动 API（worker 会在 docker-compose 中覆盖 command）
+CMD ["uvicorn", "gateway.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
