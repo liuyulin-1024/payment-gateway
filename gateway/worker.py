@@ -80,7 +80,7 @@ class WebhookDeliveryWorker:
             deliveries = result.scalars().all()
 
             if not deliveries:
-                logger.debug("webhook_delivery_worker_no_pending_tasks")
+                # logger.debug("webhook_delivery_worker_no_pending_tasks")
                 return
 
             logger.info(

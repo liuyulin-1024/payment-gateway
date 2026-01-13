@@ -55,6 +55,7 @@ alembic/versions/*.pyc
 Thumbs.db
 
 data/
+run.py
 
 # Resources
 *.example

@@ -8,7 +8,8 @@ from typing import AsyncGenerator
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-from .db import close_db, init_db
+from gateway.db import close_db, init_db
+from gateway.core.bootstrap import reset_tables
 from gateway.core.logging import configure_logging
 from gateway.core.settings import get_settings
 
@@ -20,6 +21,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """应用生命周期管理：启动时初始化,关闭时清理"""
     # 启动
     configure_logging()
+    await reset_tables()
     await init_db()
     yield
     # 关闭

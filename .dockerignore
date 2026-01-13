@@ -1,0 +1,53 @@
+# Python 虚拟环境
+.venv
+venv
+env
+ENV
+
+# Python 缓存文件
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# 测试和覆盖率
+.pytest_cache
+.coverage
+htmlcov
+*.cover
+
+# IDE 配置
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# 文档
+docs/
+*.md
+README.md
+
+# 测试文件（如果不需要在镜像中运行测试）
+tests/
+
+# 环境变量文件
+.env
+.env.*
+data/env.example
+
+# 其他
+*.log
+.DS_Store
+Thumbs.db
