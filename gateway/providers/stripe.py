@@ -529,7 +529,7 @@ class StripeAdapter(ProviderAdapter):
         - checkout.session.completed: Checkout Session 完成
         - checkout.session.async_payment_succeeded: 异步支付成功（Alipay等）
         - checkout.session.async_payment_failed: 异步支付失败
-        - checkout.session.expired: Session 过期
+        - checkout.session.expired: Session 过期（网关统一视为 canceled）
 
         Args:
             headers: HTTP 请求头
@@ -572,23 +572,23 @@ class StripeAdapter(ProviderAdapter):
             provider_txn_id = event_data.get("payment_intent")  # 可能是 None
             merchant_order_no = event_data.get("metadata", {}).get("merchant_order_no")
 
-            # 如果是 Session 完成事件，可以从 payment_intent 获取更多信息
-            if provider_txn_id and event_type == "checkout.session.completed":
-                # 检查支付状态
+            # Checkout Session 完成：无论是否有 payment_intent，都以 payment_status 为准
+            if event_type == "checkout.session.completed":
                 payment_status = event_data.get("payment_status")
                 if payment_status == "paid":
                     outcome = "succeeded"
                 elif payment_status == "unpaid":
+                    # 异步支付方式（如 Alipay）常见：Session completed 但尚未支付完成
                     outcome = "pending"
                 else:
                     outcome = "unknown"
             else:
                 # 其他 Checkout Session 事件
                 outcome_map = {
-                    "checkout.session.completed": "completed",
                     "checkout.session.async_payment_succeeded": "succeeded",
                     "checkout.session.async_payment_failed": "failed",
-                    "checkout.session.expired": "expired",
+                    # 状态收敛：expired 统一视为 canceled
+                    "checkout.session.expired": "canceled",
                 }
                 outcome = outcome_map.get(event_type, "unknown")
         else:

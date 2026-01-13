@@ -83,7 +83,7 @@ class CallbackService:
         if new_status in [
             PaymentStatus.succeeded,
             PaymentStatus.failed,
-            PaymentStatus.expired,
+            PaymentStatus.canceled,
         ]:
             await self._create_webhook_delivery(payment, new_status)
 
@@ -154,7 +154,8 @@ class CallbackService:
             "succeeded": PaymentStatus.succeeded,
             "failed": PaymentStatus.failed,
             "canceled": PaymentStatus.canceled,
-            "expired": PaymentStatus.expired,
+            # 统一收敛：过期视为取消（未完成支付而关闭）
+            "expired": PaymentStatus.canceled,
             "pending": PaymentStatus.pending,
         }
         return outcome_map.get(outcome)

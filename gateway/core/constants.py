@@ -29,12 +29,10 @@ class PayType(str, enum.Enum):
 
 
 class PaymentStatus(str, enum.Enum):
-    created = "created"
     pending = "pending"
     succeeded = "succeeded"
     failed = "failed"
     canceled = "canceled"
-    expired = "expired"
 
 
 class CallbackStatus(str, enum.Enum):

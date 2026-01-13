@@ -106,7 +106,7 @@ class PaymentService:
             provider=req.provider,
             amount=total_amount,
             currency=req.currency,
-            status=PaymentStatus.created,
+            status=PaymentStatus.pending,
             notify_url=req.notify_url or app.notify_url,
             provider_txn_id=None,
         )

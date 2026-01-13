@@ -263,6 +263,8 @@ class AlipayAdapter(ProviderAdapter):
 
         # 映射 trade_status 到 outcome
         outcome_map = {
+            # 等待买家付款（交易创建成功，尚未支付）
+            "WAIT_BUYER_PAY": "pending",
             "TRADE_SUCCESS": "succeeded",
             "TRADE_FINISHED": "succeeded",
             "TRADE_CLOSED": "canceled",

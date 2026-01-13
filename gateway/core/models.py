@@ -128,7 +128,7 @@ class Payment(Base):
     status: Mapped[PaymentStatus] = mapped_column(
         Enum(PaymentStatus, name="payment_status"),
         nullable=False,
-        default=PaymentStatus.created,
+        default=PaymentStatus.pending,
         comment="支付状态",
     )
 
