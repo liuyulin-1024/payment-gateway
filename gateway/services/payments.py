@@ -57,9 +57,12 @@ class PaymentService:
         existing = result.scalar_one_or_none()
 
         if existing:
+            # 计算请求的总金额
+            request_total_amount = (req.unit_amount or 0) * req.quantity
+            
             # 幂等检查：验证关键字段是否一致
             if (
-                existing.amount != req.amount
+                existing.amount != request_total_amount
                 or existing.currency != req.currency
                 or existing.provider != req.provider
             ):
@@ -68,7 +71,7 @@ class PaymentService:
                     existing_amount=existing.amount,
                     existing_currency=existing.currency.value,
                     existing_provider=existing.provider.value,
-                    request_amount=req.amount,
+                    request_amount=request_total_amount,
                     request_currency=req.currency.value,
                     request_provider=req.provider.value,
                 )
@@ -80,13 +83,16 @@ class PaymentService:
             log.info("payment_idempotent_return", payment_id=str(existing.id))
             return existing, False
 
+        # 计算总金额（单价 * 数量）
+        total_amount = (req.unit_amount or 0) * req.quantity
+        
         # 创建新支付
         payment = Payment(
             id=uuid.uuid4(),
             app_id=app.id,
             merchant_order_no=req.merchant_order_no,
             provider=req.provider,
-            amount=req.amount,
+            amount=total_amount,
             currency=req.currency,
             status=PaymentStatus.created,
             notify_url=req.notify_url or app.notify_url,

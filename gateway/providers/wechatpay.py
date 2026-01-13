@@ -88,12 +88,15 @@ class WeChatPayAdapter(ProviderAdapter):
     async def create_payment(
         self,
         *,
-        amount: int,
         currency: str,
         merchant_order_no: str,
-        description: str,
+        quantity: int,
         notify_url: str,
         expire_minutes: int | None = None,
+        unit_amount: int | None = None,
+        product_name: str | None = None,
+        product_desc: str | None = None,
+        **kwargs,
     ) -> ProviderPaymentResult:
         """
         微信 Native 下单
@@ -103,15 +106,18 @@ class WeChatPayAdapter(ProviderAdapter):
         """
         url = "https://api.mch.weixin.qq.com/v3/pay/transactions/native"
 
+        # 计算总金额（单价 * 数量）
+        total_amount = (unit_amount or 0) * quantity
+
         # 构造请求体
         body = {
             "appid": self.appid,
             "mchid": self.mchid,
-            "description": description[:127],  # 最大 127 字符
+            "description": (product_name or product_desc or "商品")[:127],  # 最大 127 字符
             "out_trade_no": merchant_order_no,
             "notify_url": notify_url,
             "amount": {
-                "total": amount,  # 单位：分
+                "total": total_amount,  # 单位：分
                 "currency": currency,
             },
         }
@@ -145,10 +151,19 @@ class WeChatPayAdapter(ProviderAdapter):
     async def create_refund(
         self,
         *,
-        payment_intent_id: str,
+        txn_id: str,
         refund_amount: int | None = None,
         reason: str | None = None,
     ) -> dict:
+        """
+        创建微信支付退款
+        
+        参考：https://pay.weixin.qq.com/doc/v3/merchant/4012791877
+        
+        注意：完整实现需要调用微信退款API，这里是占位实现
+        """
+        # TODO: 实现微信支付退款逻辑
+        # POST /v3/refund/domestic/refunds
         pass
 
     async def cancel_payment(

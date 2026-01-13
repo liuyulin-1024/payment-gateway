@@ -66,28 +66,37 @@ class AlipayAdapter(ProviderAdapter):
     async def create_payment(
         self,
         *,
-        amount: int,
         currency: str,
         merchant_order_no: str,
-        description: str,
+        quantity: int,
         notify_url: str,
         expire_minutes: int | None = None,
+        unit_amount: int | None = None,
+        product_name: str | None = None,
+        product_desc: str | None = None,
+        **kwargs,
     ) -> ProviderPaymentResult:
         """
         支付宝电脑网站支付（page pay）
 
         返回 form HTML（商户需在前端自动提交表单跳转到支付宝）
         """
+        # 计算总金额（单价 * 数量）
+        total_amount_cents = (unit_amount or 0) * quantity
         # 支付宝金额单位：元（需要从分转换）
-        total_amount = f"{amount / 100:.2f}"
+        total_amount = f"{total_amount_cents / 100:.2f}"
 
         # 构造业务参数
         biz_content = {
             "out_trade_no": merchant_order_no,
             "product_code": "FAST_INSTANT_TRADE_PAY",
             "total_amount": total_amount,
-            "subject": description[:256],  # 商品标题
+            "subject": (product_name or "商品")[:256],  # 商品标题
         }
+        
+        # 商品描述（可选）
+        if product_desc:
+            biz_content["body"] = product_desc[:128]
 
         # 超时时间（格式：90m / 1h / 1d）
         if expire_minutes:
@@ -129,14 +138,14 @@ class AlipayAdapter(ProviderAdapter):
         self,
         *,
         txn_id: str,
-        amount: int | None = None,
+        refund_amount: int | None = None,
         reason: str | None = None,
     ) -> dict:
         # 退款单位：元（需要从分转换）
-        refund_amount = f"{amount / 100:.2f}"
+        refund_amount_yuan = f"{refund_amount / 100:.2f}"
         biz_content = {
             "trade_no": txn_id,
-            "refund_amount": refund_amount,
+            "refund_amount": refund_amount_yuan,
             "refund_reason": reason,
         }
         request = AlipayTradeRefundRequest()

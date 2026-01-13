@@ -4,11 +4,19 @@ Provider Adapter 基类（定义统一接口）
 
 from abc import ABC, abstractmethod
 from typing import Any
+from enum import Enum
 
 from pydantic import BaseModel
 
 from gateway.core.constants import Provider
 from gateway.core.schemas import PaymentTypeEnum, CallbackEvent
+
+
+class PaymentFlowType(str, Enum):
+    """支付流程类型"""
+
+    HOSTED = "hosted"  # 托管支付（跳转到支付渠道页面）- Stripe Session, Alipay Form, WeChat QR
+    DIRECT = "direct"  # 直接支付（客户端集成 SDK）- Stripe PaymentIntent
 
 
 class ProviderPaymentResult(BaseModel):
@@ -28,8 +36,58 @@ class ProviderAdapter(ABC):
         """渠道标识"""
         pass
 
+    @property
+    def supported_flows(self) -> list[PaymentFlowType]:
+        """
+        当前 provider 支持的支付流程类型
+        
+        子类可以重写此方法声明支持的流程
+        默认只支持 HOSTED 流程
+        """
+        return [PaymentFlowType.HOSTED]
+
     @abstractmethod
     async def create_payment(
+        self,
+        *,
+        currency: str,
+        merchant_order_no: str,
+        quantity: int,
+        notify_url: str,
+        expire_minutes: int | None = None,
+        unit_amount: int | None = None,
+        product_name: str | None = None,
+        product_desc: str | None = None,
+        **kwargs,
+    ) -> ProviderPaymentResult:
+        """
+        创建支付（统一入口）
+        
+        这是主要的支付创建方法，适用于：
+        - Stripe Checkout Session（托管页面）
+        - Alipay 电脑网站支付（Form 表单）
+        - WeChat Native 支付（二维码）
+        
+        参数：
+            currency: 货币代码（如 USD, CNY）
+            merchant_order_no: 商户订单号
+            quantity: 数量
+            notify_url: 异步回调通知 URL
+            expire_minutes: 过期时间（分钟）
+            unit_amount: 单价（最小货币单位，如分）
+            product_name: 商品名称
+            product_desc: 商品描述
+            **kwargs: 额外参数（如 success_url, cancel_url, metadata）
+        
+        返回：
+            ProviderPaymentResult:
+                - type: 支付类型（url/form/qr/client_secret）
+                - payload: 支付数据
+                - provider_txn_id: 渠道交易号（如果有）
+        """
+        pass
+
+    async def create_direct_payment(
         self,
         *,
         amount: int,
@@ -38,13 +96,30 @@ class ProviderAdapter(ABC):
         description: str,
         notify_url: str,
         expire_minutes: int | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> ProviderPaymentResult:
         """
-        创建支付（调用渠道下单 API）
-
-        返回：统一的 ProviderPaymentResult（type + payload）
+        创建直接支付（可选实现）
+        
+        适用于需要客户端 SDK 集成的场景：
+        - Stripe PaymentIntent（返回 client_secret）
+        - 微信 APP 支付（返回调起参数）
+        - 支付宝 APP 支付（返回 SDK 参数）
+        
+        如果渠道不支持此流程，保持默认实现即可。
+        
+        参数：同 create_payment
+        
+        返回：
+            ProviderPaymentResult:
+                - type: 通常是 client_secret
+                - payload: SDK 需要的参数
+                - provider_txn_id: 渠道交易号
         """
-        pass
+        raise NotImplementedError(
+            f"{self.provider} 不支持 DIRECT 支付流程。"
+            f"请使用 create_payment() 方法创建托管支付。"
+        )
 
     @abstractmethod
     async def create_refund(

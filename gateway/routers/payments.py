@@ -69,12 +69,17 @@ async def create_payment(
         expire_minutes = req.expire_minutes or settings.payment_expire_minutes_default
 
         result = await provider_adapter.create_payment(
-            amount=req.amount,
             currency=req.currency.value,
             merchant_order_no=req.merchant_order_no,
-            description=req.description,
+            quantity=req.quantity,
             notify_url=payment.notify_url,
             expire_minutes=expire_minutes,
+            unit_amount=req.unit_amount,
+            product_name=req.product_name,
+            product_desc=req.product_desc,
+            success_url=req.success_url,
+            cancel_url=req.cancel_url,
+            metadata=req.metadata,
         )
 
         # 更新 provider_txn_id（如果渠道返回）

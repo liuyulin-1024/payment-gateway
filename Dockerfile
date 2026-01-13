@@ -24,5 +24,5 @@ COPY . .
 # 暴露端口（FastAPI 默认 8000）
 EXPOSE 8000
 
-# 默认命令（可被 docker-compose 覆盖）
-CMD ["uvicorn", "payment_gateway.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# 默认命令（使用 uv run 确保在正确的环境中运行）
+CMD ["uv", "run", "uvicorn", "gateway.main:app", "--host", "0.0.0.0", "--port", "8000"]

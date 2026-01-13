@@ -28,6 +28,7 @@ class PaymentTypeEnum(str, Enum):
     form = "form"
     qr = "qr"
     client_secret = "client_secret"
+    url = "url"
 
 
 # ===== 创建支付 =====
@@ -40,15 +41,21 @@ class CreatePaymentRequest(BaseModel):
         ..., min_length=1, max_length=64, description="商户订单号"
     )
     provider: Provider = Field(..., description="支付渠道")
-    amount: int = Field(..., gt=0, description="支付金额（最小货币单位，如分）")
     currency: Currency = Field(..., description="币种")
-    description: str = Field("", max_length=200, description="商品描述")
+    quantity: int = Field(..., gt=0, description="商品数量")
+    unit_amount: int | None = Field(None, gt=0, description="单价（最小货币单位，如分）")
+    product_name: str | None = Field(None, max_length=250, description="商品名称")
+    product_desc: str | None = Field(None, max_length=500, description="商品描述")
     notify_url: str | None = Field(
         None, max_length=2048, description="本单回调地址（覆盖 App 默认）"
     )
     expire_minutes: int | None = Field(
         None, gt=0, le=1440, description="过期时间（分钟）"
     )
+    # 可选参数
+    success_url: str | None = Field(None, max_length=2048, description="支付成功跳转 URL")
+    cancel_url: str | None = Field(None, max_length=2048, description="取消支付跳转 URL")
+    metadata: dict[str, Any] | None = Field(None, description="额外的元数据")
 
 
 class CreatePaymentResponse(BaseModel):
