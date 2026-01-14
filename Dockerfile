@@ -43,8 +43,6 @@ COPY . /app
 # FastAPI 默认端口
 EXPOSE 8000
 
-USER appuser
-
 # 默认启动 API（worker 会在 docker-compose 中覆盖 command）
 CMD ["uvicorn", "gateway.main:app", "--host", "0.0.0.0", "--port", "8000"]
 

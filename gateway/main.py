@@ -2,20 +2,19 @@
 FastAPI 主应用入口
 """
 
-from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 import traceback
 import structlog
+from typing import AsyncGenerator
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, status
-from fastapi.responses import JSONResponse
-from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 
 from gateway.db import close_db, init_db
+from gateway.core.settings import get_settings
 from gateway.core.bootstrap import reset_tables
 from gateway.core.logging import configure_logging
-from gateway.core.settings import get_settings
 from gateway.core.exceptions import BaseAPIException
 from gateway.core.responses import (
     error_response,

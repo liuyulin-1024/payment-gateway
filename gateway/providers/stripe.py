@@ -159,6 +159,8 @@ class StripeAdapter(ProviderAdapter):
             expire_seconds = max(1800, min(expire_minutes * 60, 86400))
             session_data["expires_at"] = int(time.time() + expire_seconds)
 
+        logger.info(f"Stripe Checkout Params：{session_data}")
+
         try:
             session = stripe.checkout.Session.create(**session_data)
 
