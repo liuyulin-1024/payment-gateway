@@ -176,7 +176,7 @@ class StripeAdapter(ProviderAdapter):
                     "checkout_url": session.url,
                     "session_id": session.id,
                 },
-                provider_txn_id=session.payment_intent if isinstance(session.payment_intent, str) else None,
+                provider_txn_id=session.id,
             )
 
         except stripe.error.InvalidRequestError as e:
@@ -197,7 +197,7 @@ class StripeAdapter(ProviderAdapter):
                             "checkout_url": session.url,
                             "session_id": session.id,
                         },
-                        provider_txn_id=session.payment_intent if isinstance(session.payment_intent, str) else None,
+                        provider_txn_id=session.id,
                     )
                 except stripe.StripeError as retry_error:
                     logger.error(f"回退创建失败: {str(retry_error)}")
@@ -328,12 +328,12 @@ class StripeAdapter(ProviderAdapter):
             session = stripe.checkout.Session.expire(session_id)
 
             logger.info(
-                f"Checkout Session 取消成功 - ID: {session.id}, "
+                f"Checkout Session 取消操作完成 - ID: {session.id}, "
                 f"状态: {session.status}"
             )
 
             return {
-                "success": True,
+                "success": bool(session.status == 'expired'),
                 "session_id": session.id,
                 "status": session.status,  # 应该是 'expired'
             }
@@ -342,17 +342,15 @@ class StripeAdapter(ProviderAdapter):
             # Session 已完成或无法取消
             logger.warning(
                 f"Checkout Session 无法取消 - ID: {provider_txn_id}, "
-                f"订单号: {merchant_order_no}, 错误: {str(e)}"
+                f"订单号: {merchant_order_no}, 错误: {traceback.format_exc()}"
             )
-            traceback.print_exc()
             return {
                 "success": False,
                 "error": str(e),
                 "message": "Checkout Session 无法取消（可能已完成或状态不允许）",
             }
         except stripe.error.StripeError as e:
-            logger.error(f"取消 Checkout Session 失败 - ID: {provider_txn_id}, 错误: {str(e)}")
-            traceback.print_exc()
+            logger.error(f"取消 Checkout Session 失败 - ID: {provider_txn_id}, 错误: {traceback.format_exc()}")
             raise ValueError(f"Stripe 取消支付失败: {str(e)}")
 
     async def get_refund(self, refund_id: str) -> dict:

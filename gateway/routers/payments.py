@@ -4,7 +4,7 @@
 
 import uuid
 import structlog
-from fastapi import APIRouter, Depends, Header, Security
+from fastapi import APIRouter, Depends, Header, Query, Security
 from fastapi.security import APIKeyHeader
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,6 +15,7 @@ from gateway.core.settings import get_settings
 from gateway.core.constants import PaymentStatus
 from gateway.core.auth import get_app_from_api_key
 from gateway.services.payments import PaymentService
+from gateway.services.refunds import RefundService
 from gateway.core.exceptions import PaymentProviderException
 from gateway.core.responses import success_response, bad_request_response, validation_error_response
 from gateway.core.schemas import (
@@ -23,6 +24,9 @@ from gateway.core.schemas import (
     CancelPaymentRequest,
     CancelPaymentResponse,
     PaymentResponse,
+    CreateRefundRequest,
+    RefundResponse,
+    RefundListResponse,
 )
 
 
@@ -229,3 +233,123 @@ async def get_payment_by_merchant_order_no(
     )
     response_data = PaymentResponse.model_validate(payment)
     return success_response(data=response_data.model_dump(mode='json'), msg="查询成功")
+
+
+@router.post("/refunds", status_code=201)
+async def create_refund(
+    req: CreateRefundRequest,
+    app: App = Depends(get_app_from_api_key),
+    session: AsyncSession = Depends(get_session),
+    api_key: str = Security(api_key_header),
+):
+    """
+    创建退款
+
+    - 仅允许本应用内的支付交易退款
+    - 退款金额不传则默认全额退款
+    - 鉴权：需要在请求头中提供 X-API-Key
+    """
+    log = logger.bind(app_id=str(app.id), payment_id=str(req.payment_id))
+    log.info("收到创建退款请求")
+
+    payment_service = PaymentService(session)
+    await payment_service.get_payment_by_id(app, req.payment_id)
+
+    refund_service = RefundService(session)
+    refund = await refund_service.create_refund(req)
+
+    log.info("退款创建成功", refund_id=str(refund.id))
+    response_data = RefundResponse.model_validate(refund)
+    return success_response(
+        data=response_data.model_dump(mode='json'),
+        msg="退款创建成功",
+        status_code=201,
+    )
+
+
+@router.get("/refunds/{refund_id}")
+async def get_refund(
+    refund_id: uuid.UUID,
+    app: App = Depends(get_app_from_api_key),
+    session: AsyncSession = Depends(get_session),
+    api_key: str = Security(api_key_header),
+):
+    """
+    查询退款详情
+
+    - 仅允许查询本应用内的退款记录
+    - 鉴权：需要在请求头中提供 X-API-Key
+    """
+    log = logger.bind(app_id=str(app.id), refund_id=str(refund_id))
+    log.info("收到退款详情查询请求")
+
+    refund_service = RefundService(session)
+    refund = await refund_service.get_refund(refund_id)
+
+    payment_service = PaymentService(session)
+    await payment_service.get_payment_by_id(app, refund.payment_id)
+
+    response_data = RefundResponse.model_validate(refund)
+    return success_response(data=response_data.model_dump(mode='json'), msg="查询成功")
+
+
+@router.get("/payments/{payment_id}/refunds")
+async def list_refunds_by_payment(
+    payment_id: uuid.UUID,
+    skip: int = Query(0, ge=0, description="跳过的记录数"),
+    limit: int = Query(100, ge=1, le=1000, description="返回的最大记录数"),
+    app: App = Depends(get_app_from_api_key),
+    session: AsyncSession = Depends(get_session),
+    api_key: str = Security(api_key_header),
+):
+    """
+    查询支付的退款记录
+
+    - 仅允许查询本应用内的支付记录
+    - 鉴权：需要在请求头中提供 X-API-Key
+    """
+    log = logger.bind(app_id=str(app.id), payment_id=str(payment_id))
+    log.info("收到退款列表查询请求", skip=skip, limit=limit)
+
+    payment_service = PaymentService(session)
+    await payment_service.get_payment_by_id(app, payment_id)
+
+    refund_service = RefundService(session)
+    refunds, total = await refund_service.list_refunds_by_payment(
+        payment_id=payment_id,
+        skip=skip,
+        limit=limit,
+    )
+
+    response_data = RefundListResponse(
+        total=total, items=[RefundResponse.model_validate(refund) for refund in refunds]
+    )
+    return success_response(data=response_data.model_dump(mode='json'), msg="查询成功")
+
+
+@router.post("/refunds/{refund_id}/sync")
+async def sync_refund_status(
+    refund_id: uuid.UUID,
+    app: App = Depends(get_app_from_api_key),
+    session: AsyncSession = Depends(get_session),
+    api_key: str = Security(api_key_header),
+):
+    """
+    同步退款状态
+
+    - 仅允许同步本应用内的退款记录
+    - 鉴权：需要在请求头中提供 X-API-Key
+    """
+    log = logger.bind(app_id=str(app.id), refund_id=str(refund_id))
+    log.info("收到退款状态同步请求")
+
+    refund_service = RefundService(session)
+    refund = await refund_service.get_refund(refund_id)
+
+    payment_service = PaymentService(session)
+    await payment_service.get_payment_by_id(app, refund.payment_id)
+
+    refund = await refund_service.sync_refund_status(refund_id)
+
+    response_data = RefundResponse.model_validate(refund)
+    return success_response(data=response_data.model_dump(mode='json'), msg="状态同步成功")
