@@ -16,7 +16,6 @@ class PaymentFlowType(str, Enum):
     """支付流程类型"""
 
     HOSTED = "hosted"  # 托管支付（跳转到支付渠道页面）- Stripe Session, Alipay Form, WeChat QR
-    DIRECT = "direct"  # 直接支付（客户端集成 SDK）- Stripe PaymentIntent
 
 
 class ProviderPaymentResult(BaseModel):
@@ -81,45 +80,11 @@ class ProviderAdapter(ABC):
         
         返回：
             ProviderPaymentResult:
-                - type: 支付类型（url/form/qr/client_secret）
+                - type: 支付类型（url/form/qr）
                 - payload: 支付数据
                 - provider_txn_id: 渠道交易号（如果有）
         """
         pass
-
-    async def create_direct_payment(
-        self,
-        *,
-        amount: int,
-        currency: str,
-        merchant_order_no: str,
-        description: str,
-        notify_url: str,
-        expire_minutes: int | None = None,
-        metadata: dict[str, Any] | None = None,
-    ) -> ProviderPaymentResult:
-        """
-        创建直接支付（可选实现）
-        
-        适用于需要客户端 SDK 集成的场景：
-        - Stripe PaymentIntent（返回 client_secret）
-        - 微信 APP 支付（返回调起参数）
-        - 支付宝 APP 支付（返回 SDK 参数）
-        
-        如果渠道不支持此流程，保持默认实现即可。
-        
-        参数：同 create_payment
-        
-        返回：
-            ProviderPaymentResult:
-                - type: 通常是 client_secret
-                - payload: SDK 需要的参数
-                - provider_txn_id: 渠道交易号
-        """
-        raise NotImplementedError(
-            f"{self.provider} 不支持 DIRECT 支付流程。"
-            f"请使用 create_payment() 方法创建托管支付。"
-        )
 
     @abstractmethod
     async def create_refund(

@@ -51,7 +51,7 @@ class AppService:
         existing_app = result.scalar_one_or_none()
 
         if existing_app:
-            log.warning("app_name_already_exists")
+            log.warning("应用名称已存在")
             raise BadRequestException(
                 message=f"应用名称 '{req.name}' 已存在",
                 code=4008,
@@ -71,7 +71,7 @@ class AppService:
                 break
 
         if api_key is None:
-            log.error("failed_to_generate_unique_api_key")
+            log.error("生成唯一API Key失败")
             raise InternalServerException(
                 message="生成唯一的 API Key 失败",
                 code=5004,
@@ -90,7 +90,7 @@ class AppService:
         await self.session.commit()
         await self.session.refresh(app)
 
-        log.info("app_created", app_id=str(app.id), api_key=api_key)
+        log.info("应用创建完成", app_id=str(app.id), api_key=api_key)
         return app
 
     async def list_apps(self, skip: int = 0, limit: int = 100) -> tuple[list[App], int]:
@@ -114,7 +114,7 @@ class AppService:
         result = await self.session.execute(stmt)
         apps = list(result.scalars().all())
 
-        logger.info("apps_listed", total=total, returned=len(apps))
+        logger.info("应用列表查询完成", total=total, returned=len(apps))
         return apps, total
 
     async def get_app_by_id(self, app_id: uuid.UUID) -> App:
@@ -158,7 +158,7 @@ class AppService:
         await self.session.delete(app)
         await self.session.commit()
 
-        logger.info("app_deleted", app_id=str(app_id))
+        logger.info("应用删除完成", app_id=str(app_id))
 
     async def update_app_status(self, app_id: uuid.UUID, is_active: bool) -> App:
         """
@@ -180,5 +180,5 @@ class AppService:
         await self.session.commit()
         await self.session.refresh(app)
 
-        logger.info("app_status_updated", app_id=str(app_id), is_active=is_active)
+        logger.info("应用状态更新完成", app_id=str(app_id), is_active=is_active)
         return app

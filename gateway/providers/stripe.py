@@ -56,8 +56,8 @@ class StripeAdapter(ProviderAdapter):
 
     @property
     def supported_flows(self) -> list[PaymentFlowType]:
-        """Stripe 支持两种支付流程"""
-        return [PaymentFlowType.HOSTED, PaymentFlowType.DIRECT]
+        """Stripe 仅支持 Checkout 托管支付流程"""
+        return [PaymentFlowType.HOSTED]
 
     async def create_payment(
         self,
@@ -109,7 +109,7 @@ class StripeAdapter(ProviderAdapter):
         payment_method_types = kwargs.get("payment_method_types")  # 手动指定支付方式
         
         logger.info(
-            f"创建 Stripe Checkout Session - 订单号: {merchant_order_no}, "
+            f"开始创建Stripe Checkout Session - 订单号: {merchant_order_no}, "
             f"单价: {unit_amount}, 数量: {quantity}, 货币: {currency}"
         )
 
@@ -149,9 +149,9 @@ class StripeAdapter(ProviderAdapter):
             session_data["payment_method_types"] = payment_method_types
             logger.info(f"使用指定支付方式: {', '.join(payment_method_types)}")
         else:
-            # 默认支付方式：card（信用卡）、支付宝
-            session_data["payment_method_types"] = ["card", "alipay"]
-            logger.info("使用默认支付方式: card、alipay")
+            # 默认支付方式：card（信用卡）
+            session_data["payment_method_types"] = ["card"]
+            logger.info("使用默认支付方式: card")
 
         # 如果指定了过期时间
         if expire_minutes:
@@ -159,7 +159,7 @@ class StripeAdapter(ProviderAdapter):
             expire_seconds = max(1800, min(expire_minutes * 60, 86400))
             session_data["expires_at"] = int(time.time() + expire_seconds)
 
-        logger.info(f"Stripe Checkout Params：{session_data}")
+        logger.info(f"Stripe 下单参数：{session_data}")
 
         try:
             session = stripe.checkout.Session.create(**session_data)
@@ -182,15 +182,15 @@ class StripeAdapter(ProviderAdapter):
         except stripe.error.InvalidRequestError as e:
             # 处理参数错误（如不支持的支付方式）
             error_msg = str(e)
-            logger.error(f"Stripe 请求参数错误: {error_msg}")
+            logger.error(f"Stripe 请求参数错误：{error_msg}")
             
             # 如果是支付方式相关错误，尝试回退到只使用 card
             if "payment_method" in error_msg.lower() and session_data.get("payment_method_types") != ["card"]:
-                logger.warning("回退到只使用 card 支付方式")
+                logger.warning("回退为仅使用 card 支付方式")
                 session_data["payment_method_types"] = ["card"]
                 try:
                     session = stripe.checkout.Session.create(**session_data)
-                    logger.info(f"使用回退方式创建成功 - ID: {session.id}")
+                    logger.info(f"回退方式创建成功 - ID: {session.id}")
                     return ProviderPaymentResult(
                         type=PaymentTypeEnum.url,
                         payload={
@@ -200,7 +200,7 @@ class StripeAdapter(ProviderAdapter):
                         provider_txn_id=session.payment_intent if isinstance(session.payment_intent, str) else None,
                     )
                 except stripe.StripeError as retry_error:
-                    logger.error(f"回退创建也失败: {str(retry_error)}")
+                    logger.error(f"回退创建失败: {str(retry_error)}")
                     traceback.print_exc()
                     raise
             else:
@@ -209,135 +209,9 @@ class StripeAdapter(ProviderAdapter):
                 
         except stripe.StripeError as e:
             error_msg = e.user_message if hasattr(e, "user_message") else str(e)
-            logger.error(f"Stripe Checkout Session 创建失败: {error_msg}")
+            logger.error(f"Stripe Checkout Session 创建失败：{error_msg}")
             traceback.print_exc()
             raise
-
-    async def create_direct_payment(
-        self,
-        *,
-        amount: int,
-        currency: str,
-        merchant_order_no: str,
-        description: str,
-        notify_url: str,
-        expire_minutes: int | None = None,
-        metadata: dict | None = None,
-    ) -> ProviderPaymentResult:
-        """
-        创建 Stripe PaymentIntent（直接支付）
-        
-        适用于需要自定义支付 UI 的场景，前端需要集成 Stripe.js。
-        
-        Args:
-            amount: 支付金额（最小货币单位，如分）
-            currency: 货币代码（如 USD, CNY）
-            merchant_order_no: 商户订单号
-            description: 支付描述
-            notify_url: 回调通知 URL
-            expire_minutes: 过期时间（分钟），Stripe 不直接支持，由网关 worker 扫描
-            metadata: 额外的元数据
-        
-        Returns:
-            ProviderPaymentResult: 包含 client_secret 和 provider_txn_id
-        
-        参考：https://docs.stripe.com/payments/quickstart
-        """
-        logger.info(
-            f"创建 Stripe PaymentIntent - 订单号: {merchant_order_no}, "
-            f"金额: {amount}, 货币: {currency}"
-        )
-
-        # 准备元数据
-        payment_metadata = {
-            "merchant_order_no": merchant_order_no,
-            **(metadata or {}),
-        }
-
-        # Stripe 金额单位：分（最小货币单位）
-        payment_intent = stripe.PaymentIntent.create(
-            amount=amount,
-            currency=currency.lower(),
-            description=description,
-            metadata=payment_metadata,
-            # Stripe 不直接支持过期时间，但可以通过 cancel 来实现
-            # v1 暂不实现渠道侧过期，由网关 worker 扫描
-        )
-
-        logger.info(f"PaymentIntent 创建成功 - ID: {payment_intent.id}")
-
-        return ProviderPaymentResult(
-            type=PaymentTypeEnum.client_secret,
-            payload={
-                "client_secret": payment_intent.client_secret,
-            },
-            provider_txn_id=payment_intent.id,
-        )
-
-    async def confirm_payment(self, payment_id: uuid, txn_id: str):
-        """
-        确认 Stripe PaymentIntent
-
-        Args:
-            payment_id: 内部支付 ID
-            txn_id: Stripe PaymentIntent ID
-        """
-        try:
-            payment_intent = stripe.PaymentIntent.retrieve(txn_id)
-
-            # 如果 Stripe 侧已经是成功状态，跳过 confirm
-            if payment_intent.status == "succeeded":
-                logger.info(f"PaymentIntent 已处于成功状态 - ID: {txn_id}")
-                return
-
-            if payment_intent.status in [
-                "requires_payment_method",
-                "requires_confirmation",
-                "requires_action",
-            ]:
-                # 需要 confirm 的状态，根据 PaymentIntent 配置构造参数
-                logger.info(f"正在确认 PaymentIntent - ID: {txn_id}, 状态: {payment_intent.status}")
-
-                # 构造 confirm 参数
-                confirm_params = {}
-
-                # 1. 如果 PaymentIntent 没有绑定 payment_method，提供测试卡
-                if not payment_intent.payment_method:
-                    confirm_params["payment_method"] = "pm_card_visa"  # Stripe 测试卡
-                    logger.debug("使用测试支付方式")
-
-                # 2. 提供 return_url（某些支付方式可能需要重定向）
-                confirm_params["return_url"] = (
-                    f"http://localhost:8000/test/payment-return?payment_id={payment_id}"
-                )
-                logger.debug(f"提供返回 URL: {confirm_params['return_url']}")
-
-                # 3. 调用 Stripe API confirm
-                stripe.PaymentIntent.confirm(txn_id, **confirm_params)
-                logger.info(f"PaymentIntent 确认成功 - ID: {txn_id}")
-
-        except stripe.error.StripeError:
-            logger.error(f"确认 PaymentIntent 失败 - ID: {txn_id}")
-            traceback.print_exc()
-
-        # 4. 再次检查状态，确保支付真的成功了
-        try:
-            payment_intent = stripe.PaymentIntent.retrieve(txn_id)
-            final_status = payment_intent.status
-
-            # 检查是否真的成功
-            if final_status != "succeeded":
-                # 如果不是 succeeded，可能需要额外操作（如 3D 验证）
-                raise ValueError(
-                    f"PaymentIntent 状态为 '{final_status}'，而非 'succeeded'。"
-                    f"可能需要额外的认证或操作。"
-                )
-
-            logger.info(f"PaymentIntent 最终状态确认: {final_status}")
-
-        except stripe.error.StripeError as e:
-            logger.error(f"获取 PaymentIntent 最终状态失败 - ID: {txn_id}")
-            raise ValueError(f"无法获取 PaymentIntent 最终状态: {str(e)}")
 
     async def create_refund(
         self,
@@ -441,7 +315,7 @@ class StripeAdapter(ProviderAdapter):
                 # 或者要求调用方必须提供 provider_txn_id
                 raise ValueError("Stripe cancel_payment 需要提供 provider_txn_id (PaymentIntent ID)")
 
-            logger.info(f"正在取消 PaymentIntent - ID: {payment_intent_id}, 订单号: {merchant_order_no}")
+            logger.info(f"开始取消 PaymentIntent - ID: {payment_intent_id}, 订单号: {merchant_order_no}")
 
             # 调用 Stripe API 取消 PaymentIntent
             payment_intent = stripe.PaymentIntent.cancel(
@@ -496,7 +370,7 @@ class StripeAdapter(ProviderAdapter):
             refund = stripe.Refund.retrieve(refund_id)
 
             logger.info(
-                f"查询退款成功 - Refund ID: {refund.id}, "
+                f"退款查询成功 - Refund ID: {refund.id}, "
                 f"状态: {refund.status}, "
                 f"金额: {refund.amount} {refund.currency.upper()}"
             )
@@ -512,7 +386,7 @@ class StripeAdapter(ProviderAdapter):
             }
 
         except stripe.error.StripeError as e:
-            logger.error(f"查询 Stripe 退款失败 - Refund ID: {refund_id}, 错误: {str(e)}")
+            logger.error(f"查询Stripe退款失败 - Refund ID: {refund_id}, 错误: {str(e)}")
             traceback.print_exc()
             raise ValueError(f"查询 Stripe 退款失败: {str(e)}")
 
@@ -525,9 +399,6 @@ class StripeAdapter(ProviderAdapter):
         验证并解析 Stripe Webhook
 
         支持的事件类型：
-        - payment_intent.succeeded: 支付成功
-        - payment_intent.payment_failed: 支付失败
-        - payment_intent.canceled: 支付取消
         - checkout.session.completed: Checkout Session 完成
         - checkout.session.async_payment_succeeded: 异步支付成功（Alipay等）
         - checkout.session.async_payment_failed: 异步支付失败
@@ -543,7 +414,7 @@ class StripeAdapter(ProviderAdapter):
         参考：https://docs.stripe.com/webhooks
         """
         if not self.webhook_secret:
-            logger.error("Stripe webhook_secret 未配置")
+            logger.error("未配置 Stripe webhook_secret")
             raise ValueError("Stripe webhook_secret not configured")
 
         sig_header = headers.get("stripe-signature")
@@ -566,44 +437,16 @@ class StripeAdapter(ProviderAdapter):
         event_data = event["data"]["object"]
         provider_event_id = event["id"]
 
-        logger.info(f"收到 Stripe Webhook 事件 - 类型: {event_type}, ID: {provider_event_id}")
+        logger.info(f"收到Stripe Webhook事件 - 类型: {event_type}, ID: {provider_event_id}")
 
-        # 根据事件类型提取不同的字段
-        if event_type.startswith("checkout.session"):
-            # Checkout Session 事件
-            provider_txn_id = event_data.get("payment_intent")  # 可能是 None
-            merchant_order_no = event_data.get("metadata", {}).get("merchant_order_no")
+        if not event_type.startswith("checkout.session"):
+            logger.warning(f"忽略非 Checkout 事件类型: {event_type}")
+            raise ValueError(f"Unsupported Stripe event type: {event_type}")
 
-            # Checkout Session 完成：无论是否有 payment_intent，都以 payment_status 为准
-            if event_type == "checkout.session.completed":
-                payment_status = event_data.get("payment_status")
-                if payment_status == "paid":
-                    outcome = "succeeded"
-                elif payment_status == "unpaid":
-                    # 异步支付方式（如 Alipay）常见：Session completed 但尚未支付完成
-                    outcome = "pending"
-                else:
-                    outcome = "unknown"
-            else:
-                # 其他 Checkout Session 事件
-                outcome_map = {
-                    "checkout.session.async_payment_succeeded": "succeeded",
-                    "checkout.session.async_payment_failed": "failed",
-                    # 状态收敛：expired 统一视为 canceled
-                    "checkout.session.expired": "canceled",
-                }
-                outcome = outcome_map.get(event_type, "unknown")
-        else:
-            # PaymentIntent 事件
-            provider_txn_id = event_data.get("id")
-            merchant_order_no = event_data.get("metadata", {}).get("merchant_order_no")
-
-            outcome_map = {
-                "payment_intent.succeeded": "succeeded",
-                "payment_intent.payment_failed": "failed",
-                "payment_intent.canceled": "canceled",
-            }
-            outcome = outcome_map.get(event_type, "unknown")
+        # 仅处理 Checkout Session 事件
+        provider_txn_id, merchant_order_no, outcome = self._parse_checkout_event(
+            event_type, event_data
+        )
 
         logger.info(
             f"Webhook 事件解析完成 - 结果: {outcome}, "
@@ -618,6 +461,34 @@ class StripeAdapter(ProviderAdapter):
             outcome=outcome,
             raw_payload=event,
         )
+
+    def _parse_checkout_event(
+        self, event_type: str, event_data: dict
+    ) -> tuple[str | None, str | None, str]:
+        # Checkout Session 事件
+        provider_txn_id = event_data.get("payment_intent")
+        merchant_order_no = event_data.get("metadata", {}).get("merchant_order_no")
+
+        # Checkout Session 完成：无论是否有 payment_intent，都以 payment_status 为准
+        if event_type == "checkout.session.completed":
+            payment_status = event_data.get("payment_status")
+            if payment_status == "paid":
+                outcome = "succeeded"
+            elif payment_status == "unpaid":
+                # 异步支付方式（如 Alipay）常见：Session completed 但尚未支付完成
+                outcome = "pending"
+            else:
+                outcome = "unknown"
+        else:
+            # 其他 Checkout Session 事件
+            outcome_map = {
+                "checkout.session.async_payment_succeeded": "succeeded",
+                "checkout.session.async_payment_failed": "failed",
+                "checkout.session.expired": "canceled",
+            }
+            outcome = outcome_map.get(event_type, "unknown")
+
+        return provider_txn_id, merchant_order_no, outcome
 
 
 # 延迟初始化单例实例（只在首次访问时创建）

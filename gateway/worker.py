@@ -32,7 +32,7 @@ class WebhookDeliveryWorker:
     async def start(self):
         """启动 worker 主循环"""
         logger.info(
-            "webhook_delivery_worker_started",
+            "Webhook投递Worker启动",
             poll_interval=self.poll_interval,
             batch_size=self.batch_size,
             max_retries=self.max_retries,
@@ -44,7 +44,7 @@ class WebhookDeliveryWorker:
                     await self.process_pending_deliveries()
                 except Exception as exc:
                     logger.error(
-                        "webhook_delivery_worker_error",
+                        "Webhook投递Worker运行异常",
                         error=str(exc),
                         exc_info=True,
                     )
@@ -84,7 +84,7 @@ class WebhookDeliveryWorker:
                 return
 
             logger.info(
-                "webhook_delivery_worker_processing_batch",
+                "开始处理Webhook投递批次",
                 count=len(deliveries),
             )
 
@@ -117,7 +117,7 @@ class WebhookDeliveryWorker:
         await session.commit()
 
         try:
-            log.info("webhook_delivery_attempt_start", notify_url=delivery.notify_url)
+            log.info("开始投递Webhook", notify_url=delivery.notify_url)
 
             response = await self.http_client.post(
                 delivery.notify_url,
@@ -135,7 +135,7 @@ class WebhookDeliveryWorker:
                 await session.commit()
 
                 log.info(
-                    "webhook_delivery_succeeded",
+                    "Webhook投递成功",
                     http_status=response.status_code,
                 )
             else:
@@ -171,7 +171,7 @@ class WebhookDeliveryWorker:
             await session.commit()
 
             log.error(
-                "webhook_delivery_dead_letter",
+                "Webhook投递进入死信",
                 last_error=delivery.last_error,
             )
         else:
@@ -187,7 +187,7 @@ class WebhookDeliveryWorker:
             await session.commit()
 
             log.warning(
-                "webhook_delivery_failed_will_retry",
+                "Webhook投递失败将重试",
                 last_error=delivery.last_error,
                 next_attempt_at=delivery.next_attempt_at.isoformat(),
             )

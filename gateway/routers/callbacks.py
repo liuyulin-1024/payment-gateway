@@ -30,12 +30,12 @@ async def stripe_callback(
     body = await request.body()
     headers = dict(request.headers)
     log = logger.bind(provider="stripe")
-    log.info(f"callback_received: {body}")
+    log.info(f"收到回调原始内容: {body}")
 
     try:
         event = await get_stripe_adapter().parse_and_verify_callback(headers, body)
         event.raw_payload["provider"] = Provider.stripe.value
-        log.info(f"callback parsed: {event.model_dump()}")
+        log.info(f"回调解析完成: {event.model_dump()}")
 
         # 处理回调
         callback_service = CallbackService(session)
@@ -44,7 +44,7 @@ async def stripe_callback(
         return Response(status_code=200)
 
     except Exception as exc:
-        log.error("callback_processing_failed", error=str(exc), exc_info=True)
+        log.error("回调处理失败", error=str(exc), exc_info=True)
         return Response(status_code=500)
 
 
@@ -58,19 +58,19 @@ async def alipay_callback(
     headers = dict(request.headers)
 
     log = logger.bind(provider="alipay")
-    log.info(f"callback_received: {body}")
+    log.info(f"收到回调原始内容: {body}")
 
     try:
         event = await get_alipay_adapter().parse_and_verify_callback(headers, body)
         event.raw_payload["provider"] = Provider.alipay.value
-        log.info(f"callback parsed: {event.model_dump()}")
+        log.info(f"回调解析完成: {event.model_dump()}")
 
         # 处理回调
         callback_service = CallbackService(session)
         await callback_service.process_callback(event)
         return Response(status_code=200)
     except Exception as exc:
-        log.error("callback_processing_failed", error=str(exc), exc_info=True)
+        log.error("回调处理失败", error=str(exc), exc_info=True)
         return Response(status_code=500)
 
 
@@ -84,12 +84,12 @@ async def wechatpay_callback(
     headers = dict(request.headers)
 
     log = logger.bind(provider="wechatpay")
-    log.info(f"callback_received: {body} {headers}")
+    log.info(f"收到回调原始内容: {body} {headers}")
 
     try:
         # FIXME: 同 Stripe，需要动态加载配置
         return Response(status_code=200, content='{"code": "SUCCESS", "message": "OK"}')
 
     except Exception as exc:
-        log.error("callback_processing_failed", error=str(exc), exc_info=True)
+        log.error("回调处理失败", error=str(exc), exc_info=True)
         return Response(status_code=500)

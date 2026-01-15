@@ -40,7 +40,7 @@ class CallbackService:
             outcome=event.outcome,
         )
 
-        log.info("callback_processing_start")
+        log.info("开始处理回调")
 
         # 1. 写入 callbacks（幂等）
         callback = await self._upsert_callback(event)
@@ -48,7 +48,7 @@ class CallbackService:
         # 2. 定位 Payment
         payment = await self._find_payment(event)
         if not payment:
-            log.warning("callback_payment_not_found")
+            log.warning("未找到回调对应的支付")
             callback.status = CallbackStatus.failed
             await self.session.commit()
             return
@@ -74,7 +74,7 @@ class CallbackService:
                 payment.paid_at = datetime.now(UTC)
 
             log.info(
-                "callback_payment_status_updated",
+                "回调推进支付状态",
                 payment_id=str(payment_id),
                 old_status=old_status.value,
                 new_status=new_status.value,
@@ -93,7 +93,7 @@ class CallbackService:
         callback.processed_at = datetime.now(UTC)
 
         await self.session.commit()
-        log.info("callback_processing_completed", payment_id=str(payment_id))
+        log.info("回调处理完成", payment_id=str(payment_id))
 
     async def _upsert_callback(self, event: CallbackEvent) -> Callback:
         """写入 callback（幂等）"""
@@ -115,7 +115,7 @@ class CallbackService:
             return callback
         except IntegrityError:
             # 已存在（幂等），回滚后查询
-            logger.error(f"写入Callback事件失败：{traceback.format_exc()}")
+            logger.error(f"写入回调事件失败：{traceback.format_exc()}")
             await self.session.rollback()
             stmt = select(Callback).where(
                 Callback.provider == callback.provider,
@@ -176,7 +176,7 @@ class CallbackService:
 
         if not notify_url:
             logger.warning(
-                "webhook_delivery_missing_notify_url",
+                "缺少回调通知地址",
                 payment_id=str(payment.id),
                 app_id=str(payment.app_id),
             )
@@ -212,7 +212,7 @@ class CallbackService:
             existing.last_error = None
             existing.delivered_at = None
             logger.info(
-                "webhook_delivery_requeued",
+                "Webhook投递任务已重入队",
                 delivery_id=str(existing.id),
                 event_id=event_id,
             )
@@ -234,7 +234,7 @@ class CallbackService:
         self.session.add(delivery)
         await self.session.flush()
         logger.info(
-            "webhook_delivery_created",
+            "Webhook投递任务已创建",
             delivery_id=str(delivery.id),
             event_id=event_id,
         )

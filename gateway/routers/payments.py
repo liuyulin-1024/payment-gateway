@@ -53,7 +53,7 @@ async def create_payment(
         idempotency_key=idempotency_key,
     )
 
-    log.info("create_payment_request")
+    log.info("收到创建支付请求")
 
     payment_service = PaymentService(session)
 
@@ -89,7 +89,7 @@ async def create_payment(
             await session.commit()
 
         log.info(
-            "create_payment_success",
+            "创建支付成功",
             payment_id=str(payment.id),
             type=result.type.value,
         )
@@ -104,7 +104,7 @@ async def create_payment(
         return success_response(data=response_data.model_dump(mode='json'), msg="创建支付成功")
     else:
         # 幂等返回：需要重新生成 payload（简化：返回空 payload）
-        log.info("create_payment_idempotent", payment_id=str(payment.id))
+        log.info("支付幂等返回", payment_id=str(payment.id))
 
         # TODO: 从 payment 状态恢复 type/payload（v1 简化为返回空）
         response_data = CreatePaymentResponse(

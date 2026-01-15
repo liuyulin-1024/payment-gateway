@@ -66,7 +66,7 @@ class PaymentService:
                 or existing.provider != req.provider
             ):
                 log.warning(
-                    "payment_idempotency_conflict",
+                    "幂等校验冲突",
                     existing_amount=existing.amount,
                     existing_currency=existing.currency.value,
                     existing_provider=existing.provider.value,
@@ -92,7 +92,7 @@ class PaymentService:
                     }
                 )
 
-            log.info("payment_idempotent_return", payment_id=str(existing.id))
+            log.info("幂等命中返回已有支付", payment_id=str(existing.id))
             return existing, False
 
         # 计算总金额（单价 * 数量）
@@ -115,12 +115,12 @@ class PaymentService:
 
         try:
             await self.session.flush()
-            log.info("payment_created", payment_id=str(payment.id))
+            log.info("支付记录已创建", payment_id=str(payment.id))
             return payment, True
         except IntegrityError as exc:
             # 并发创建冲突（理论上应该被前面的 select 捕获，但保险起见）
             await self.session.rollback()
-            log.warning("payment_creation_race_condition", error=str(exc))
+            log.warning("支付创建并发冲突", error=str(exc))
             raise ConflictException(
                 message="支付创建并发冲突，请重试",
                 code=4092,
@@ -190,4 +190,4 @@ class PaymentService:
         if new_status == PaymentStatus.succeeded and not payment.paid_at:
             payment.paid_at = datetime.now(UTC)
 
-        log.info("payment_status_updated")
+        log.info("支付状态已更新")

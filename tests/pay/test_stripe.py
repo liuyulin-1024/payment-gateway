@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 
 env_path = project_root / ".env"
 load_dotenv(dotenv_path=env_path, verbose=True)
-print(f"[OK] Loaded env file: {env_path}\n")
+print(f"✅ 已加载环境变量文件: {env_path}\n")
 
 from gateway.providers.stripe import get_stripe_adapter
 
@@ -47,7 +47,7 @@ async def test_session():
     #     print(f"Available methods: {result1.payment_method_types}")
 
     print("\n" + "=" * 80)
-    print("Test 2: Automatic payment methods (let Stripe decide)")
+    print("测试2：自动支付方式（由 Stripe 选择）")
     print("=" * 80)
     result2 = await adapter.create_payment(
         currency=currency, merchant_order_no=merchant_order_no,
@@ -61,7 +61,7 @@ async def test_session():
     )
 
     if result2:
-        print(f"\nAutomatic methods URL:")
+        print("\n自动支付方式返回：")
         print(f"{result2.model_dump()}\n")
 
 

@@ -89,7 +89,7 @@ app.openapi = custom_openapi
 async def base_api_exception_handler(request: Request, exc: BaseAPIException):
     """处理自定义API异常"""
     logger.error(
-        "api_exception",
+        "接口异常",
         path=request.url.path,
         method=request.method,
         status_code=exc.status_code,
@@ -110,7 +110,7 @@ async def base_api_exception_handler(request: Request, exc: BaseAPIException):
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     """处理请求参数验证错误（FastAPI自动验证）"""
     logger.warning(
-        "validation_error",
+        "请求参数校验失败",
         path=request.url.path,
         method=request.method,
         errors=exc.errors(),
@@ -137,7 +137,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 async def pydantic_validation_exception_handler(request: Request, exc: ValidationError):
     """处理Pydantic数据验证错误"""
     logger.warning(
-        "pydantic_validation_error",
+        "数据模型校验失败",
         path=request.url.path,
         method=request.method,
         errors=exc.errors(),
@@ -163,7 +163,7 @@ async def pydantic_validation_exception_handler(request: Request, exc: Validatio
 async def global_exception_handler(request: Request, exc: Exception):
     """处理所有未捕获的异常"""
     logger.error(
-        "unhandled_exception",
+        "未处理的异常",
         path=request.url.path,
         method=request.method,
         error=str(exc),

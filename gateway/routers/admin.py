@@ -46,12 +46,12 @@ async def create_app(
     返回创建的应用信息，包括生成的 API Key。
     """
     log = logger.bind(name=req.name)
-    log.info("create_app_request")
+    log.info("收到创建应用请求")
 
     app_service = AppService(session)
     app = await app_service.create_app(req)
 
-    log.info("create_app_success", app_id=str(app.id))
+    log.info("应用创建成功", app_id=str(app.id))
     response_data = AppResponse.model_validate(app)
     return success_response(data=response_data.model_dump(mode='json'), msg="应用创建成功", status_code=201)
 
@@ -70,12 +70,12 @@ async def list_apps(
     - **skip**: 跳过的记录数（用于分页，默认 0）
     - **limit**: 返回的最大记录数（默认 100，最大 1000）
     """
-    logger.info("list_apps_request", skip=skip, limit=limit)
+    logger.info("收到应用列表请求", skip=skip, limit=limit)
 
     app_service = AppService(session)
     apps, total = await app_service.list_apps(skip=skip, limit=limit)
 
-    logger.info("list_apps_success", total=total, returned=len(apps))
+    logger.info("应用列表查询成功", total=total, returned=len(apps))
     response_data = AppListResponse(
         total=total, items=[AppResponse.model_validate(app) for app in apps]
     )
@@ -92,12 +92,12 @@ async def get_app(
 
     根据应用 ID 获取应用的详细信息。
     """
-    logger.info("get_app_request", app_id=str(app_id))
+    logger.info("收到应用详情请求", app_id=str(app_id))
 
     app_service = AppService(session)
     app = await app_service.get_app_by_id(app_id)
 
-    logger.info("get_app_success", app_id=str(app_id))
+    logger.info("应用详情查询成功", app_id=str(app_id))
     response_data = AppResponse.model_validate(app)
     return success_response(data=response_data.model_dump(mode='json'), msg="查询成功")
 
@@ -112,12 +112,12 @@ async def delete_app(
 
     根据应用 ID 删除应用。注意：删除应用会影响该应用下的所有支付记录。
     """
-    logger.info("delete_app_request", app_id=str(app_id))
+    logger.info("收到删除应用请求", app_id=str(app_id))
 
     app_service = AppService(session)
     await app_service.delete_app(app_id)
 
-    logger.info("delete_app_success", app_id=str(app_id))
+    logger.info("应用删除成功", app_id=str(app_id))
     return success_response(msg="应用删除成功")
 
 
@@ -134,12 +134,12 @@ async def update_app_status(
 
     - **is_active**: true 启用，false 禁用
     """
-    logger.info("update_app_status_request", app_id=str(app_id), is_active=is_active)
+    logger.info("收到应用状态更新请求", app_id=str(app_id), is_active=is_active)
 
     app_service = AppService(session)
     app = await app_service.update_app_status(app_id, is_active)
 
-    logger.info("update_app_status_success", app_id=str(app_id), is_active=is_active)
+    logger.info("应用状态更新成功", app_id=str(app_id), is_active=is_active)
     response_data = AppResponse.model_validate(app)
     return success_response(data=response_data.model_dump(mode='json'), msg="应用状态更新成功")
 
@@ -176,7 +176,7 @@ async def test_payment_success(
     """
 
     log = logger.bind(payment_id=str(payment_id))
-    log.info("test_payment_success_request")
+    log.info("收到模拟支付成功请求")
 
     # 1. 查找支付记录
     stmt = select(Payment).where(Payment.id == payment_id)
@@ -184,7 +184,7 @@ async def test_payment_success(
     payment = result.scalar_one_or_none()
 
     if not payment:
-        log.warning("payment_not_found")
+        log.warning("未找到支付记录")
         raise NotFoundException(
             message="支付记录不存在",
             code=4046,
@@ -193,7 +193,7 @@ async def test_payment_success(
 
     # 2. 检查当前状态
     if payment.status == PaymentStatus.succeeded:
-        log.info("payment_already_succeeded")
+        log.info("支付已为成功状态")
         return success_response(
             data={
                 "payment_id": str(payment.id),
@@ -209,9 +209,7 @@ async def test_payment_success(
             # 4. 在 Stripe 侧真实完成支付（用于测试）
             provider_txn_id = payment.provider_txn_id
             if not provider_txn_id:
-                log.warning(
-                    "payment_missing_provider_txn_id", payment_id=str(payment_id)
-                )
+                log.warning("支付缺少渠道交易号", payment_id=str(payment_id))
                 # 如果没有 provider_txn_id，无法在 Stripe 侧操作
                 raise BadRequestException(
                     message="支付记录缺少渠道交易ID，无法在Stripe测试",
@@ -223,7 +221,7 @@ async def test_payment_success(
             await get_stripe_adapter().confirm_payment(payment_id, provider_txn_id)
 
         case _:
-            log.warning("unsupported_provider", provider=payment.provider.value)
+            log.warning("不支持的支付渠道", provider=payment.provider.value)
             raise BadRequestException(
                 message=f"测试接口仅支持 Stripe，当前为 {payment.provider.value}",
                 code=4007,
@@ -262,9 +260,9 @@ async def test_payment_success(
     callback_service = CallbackService(session)
     try:
         await callback_service.process_callback(callback_event)
-        log.info("callback_processed_successfully")
+        log.info("回调处理成功")
     except Exception as e:
-        log.error("callback_processing_failed", error=str(e))
+        log.error("回调处理失败", error=str(e))
         raise InternalServerException(
             message="回调处理失败",
             code=5003,
@@ -275,7 +273,7 @@ async def test_payment_success(
     await session.refresh(payment)
 
     log.info(
-        "test_payment_success_completed",
+        "模拟支付成功流程完成",
         new_status=payment.status.value,
         paid_at=payment.paid_at.isoformat() if payment.paid_at else None,
     )
@@ -350,12 +348,12 @@ async def create_refund(
     ```
     """
     log = logger.bind(payment_id=str(req.payment_id))
-    log.info("create_refund_request")
+    log.info("收到创建退款请求")
 
     refund_service = RefundService(session)
     refund = await refund_service.create_refund(req)
 
-    log.info("create_refund_success", refund_id=str(refund.id))
+    log.info("退款创建成功", refund_id=str(refund.id))
     response_data = RefundResponse.model_validate(refund)
     return success_response(data=response_data.model_dump(mode='json'), msg="退款创建成功", status_code=201)
 
@@ -378,12 +376,12 @@ async def get_refund(
     ### 返回
     - 退款记录详情
     """
-    logger.info("get_refund_request", refund_id=str(refund_id))
+    logger.info("收到退款详情查询请求", refund_id=str(refund_id))
 
     refund_service = RefundService(session)
     refund = await refund_service.get_refund(refund_id)
 
-    logger.info("get_refund_success", refund_id=str(refund_id))
+    logger.info("退款详情查询成功", refund_id=str(refund_id))
     response_data = RefundResponse.model_validate(refund)
     return success_response(data=response_data.model_dump(mode='json'), msg="查询成功")
 
@@ -412,7 +410,7 @@ async def list_refunds_by_payment(
     - 退款记录列表和总数
     """
     logger.info(
-        "list_refunds_request", payment_id=str(payment_id), skip=skip, limit=limit
+        "收到退款列表查询请求", payment_id=str(payment_id), skip=skip, limit=limit
     )
 
     refund_service = RefundService(session)
@@ -422,7 +420,7 @@ async def list_refunds_by_payment(
         limit=limit,
     )
 
-    logger.info("list_refunds_success", total=total, returned=len(refunds))
+    logger.info("退款列表查询成功", total=total, returned=len(refunds))
     response_data = RefundListResponse(
         total=total, items=[RefundResponse.model_validate(refund) for refund in refunds]
     )
@@ -457,13 +455,13 @@ async def sync_refund_status(
     curl -X POST http://localhost:8000/admin/refunds/{refund_id}/sync
     ```
     """
-    logger.info("sync_refund_status_request", refund_id=str(refund_id))
+    logger.info("收到退款状态同步请求", refund_id=str(refund_id))
 
     refund_service = RefundService(session)
     refund = await refund_service.sync_refund_status(refund_id)
 
     logger.info(
-        "sync_refund_status_success",
+        "退款状态同步完成",
         refund_id=str(refund_id),
         status=refund.status.value,
     )

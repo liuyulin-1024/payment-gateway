@@ -118,7 +118,7 @@ class AlipayAdapter(ProviderAdapter):
         response = self.client.page_execute(request, http_method="POST")
 
         logger.info(
-            f"[{self.__class__.__name__}] 支付订单创建成功：{merchant_order_no=} {total_amount=}元"
+            f"[{self.__class__.__name__}] 支付宝下单成功：{merchant_order_no=} {total_amount=}元"
         )
         # response 是一个包含 form 的 HTML 字符串
         return ProviderPaymentResult(
