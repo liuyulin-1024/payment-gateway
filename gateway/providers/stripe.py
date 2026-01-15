@@ -3,13 +3,13 @@ Stripe Provider Adapter
 """
 
 import time
-import uuid
 import stripe
 import traceback
 
 from gateway.core.logging import get_logger
 from gateway.core.constants import Provider
 from gateway.core.settings import get_settings
+from gateway.core.exceptions import IgnoredException
 from gateway.core.schemas import PaymentTypeEnum, CallbackEvent
 from .base import ProviderAdapter, ProviderPaymentResult, PaymentFlowType
 
@@ -74,13 +74,13 @@ class StripeAdapter(ProviderAdapter):
     ) -> ProviderPaymentResult:
         """
         创建 Stripe 托管支付（Checkout Session）
-        
+
         这是 Stripe 推荐的集成方式，提供：
         - 完整的支付 UI（无需前端开发）
         - 自动支持多种支付方式（卡支付、支付宝、微信支付等）
         - 自动处理 3D Secure 验证
         - 移动端友好
-        
+
         Args:
             currency: 货币代码（如 USD, CNY）
             merchant_order_no: 商户订单号
@@ -90,24 +90,24 @@ class StripeAdapter(ProviderAdapter):
             unit_amount: 单价（最小货币单位，如分）
             product_name: 商品名称
             product_desc: 商品描述
-            
+
             **kwargs: 额外参数
                 - success_url: 支付成功跳转 URL
                 - cancel_url: 取消支付跳转 URL
                 - metadata: 额外的元数据
-        
+
         Returns:
             ProviderPaymentResult: 包含 session_id 和 checkout_url
-        
+
         参考：https://docs.stripe.com/payments/checkout
         """
         # 从 kwargs 中提取可选参数
         success_url = kwargs.get("success_url")
         cancel_url = kwargs.get("cancel_url")
         metadata = kwargs.get("metadata")
-        customer_email = metadata.get('customer_email')
+        customer_email = metadata.get("customer_email")
         payment_method_types = kwargs.get("payment_method_types")  # 手动指定支付方式
-        
+
         logger.info(
             f"开始创建Stripe Checkout Session - 订单号: {merchant_order_no}, "
             f"单价: {unit_amount}, 数量: {quantity}, 货币: {currency}"
@@ -139,10 +139,11 @@ class StripeAdapter(ProviderAdapter):
             "metadata": session_metadata,
             # 将 metadata 同时传递到 PaymentIntent
             "payment_intent_data": {"metadata": session_metadata},
-            "success_url": success_url or "https://example.com/success?session_id={CHECKOUT_SESSION_ID}",
+            "success_url": success_url
+            or "https://example.com/success?session_id={CHECKOUT_SESSION_ID}",
             "cancel_url": cancel_url or "https://example.com/cancel",
         }
-        
+
         # 配置支付方式（默认使用手动指定）
         if payment_method_types:
             # 用户指定的支付方式
@@ -183,9 +184,11 @@ class StripeAdapter(ProviderAdapter):
             # 处理参数错误（如不支持的支付方式）
             error_msg = str(e)
             logger.error(f"Stripe 请求参数错误：{error_msg}")
-            
+
             # 如果是支付方式相关错误，尝试回退到只使用 card
-            if "payment_method" in error_msg.lower() and session_data.get("payment_method_types") != ["card"]:
+            if "payment_method" in error_msg.lower() and session_data.get(
+                "payment_method_types"
+            ) != ["card"]:
                 logger.warning("回退为仅使用 card 支付方式")
                 session_data["payment_method_types"] = ["card"]
                 try:
@@ -206,7 +209,7 @@ class StripeAdapter(ProviderAdapter):
             else:
                 traceback.print_exc()
                 raise
-                
+
         except stripe.StripeError as e:
             error_msg = e.user_message if hasattr(e, "user_message") else str(e)
             logger.error(f"Stripe Checkout Session 创建失败：{error_msg}")
@@ -217,6 +220,7 @@ class StripeAdapter(ProviderAdapter):
         self,
         *,
         txn_id: str,
+        merchant_order_no: str,
         refund_amount: int | None = None,
         reason: str | None = None,
     ) -> dict:
@@ -224,8 +228,9 @@ class StripeAdapter(ProviderAdapter):
         创建 Stripe 退款
 
         Args:
-            txn_id: Stripe PaymentIntent ID
-            refund_amount: 退款金额（分），None 表示全额退款
+            txn_id: Stripe PaymentIntent ID 或 Checkout Session ID
+            merchant_order_no: 商户订单号
+            refund_amount: 退款金额（货币的最小单位），None 表示全额退款
             reason: 退款原因，可选值：'duplicate', 'fraudulent', 'requested_by_customer'
 
         Returns:
@@ -234,17 +239,30 @@ class StripeAdapter(ProviderAdapter):
         参考：https://docs.stripe.com/api/refunds/create
         """
         try:
+            # 兼容 Checkout Session ID（cs_），先解析为 PaymentIntent
+            payment_intent_id = txn_id
+            if txn_id.startswith("cs_"):
+                session = stripe.checkout.Session.retrieve(txn_id)
+                payment_intent_id = session.payment_intent
+                if not payment_intent_id:
+                    raise ValueError(
+                        f"Checkout Session 尚未生成 PaymentIntent，无法退款: {txn_id}"
+                    )
+
             # 构造退款参数
             refund_params = {
-                "payment_intent": txn_id,
+                "payment_intent": payment_intent_id,
+                "metadata": {"merchant_order_no": merchant_order_no},
             }
 
             # 如果指定了退款金额（部分退款）
             if refund_amount is not None:
                 refund_params["amount"] = refund_amount
-                logger.info(f"创建部分退款 - PaymentIntent: {txn_id}, 金额: {refund_amount}")
+                logger.info(
+                    f"创建部分退款 - PaymentIntent: {payment_intent_id}, 金额: {refund_amount}"
+                )
             else:
-                logger.info(f"创建全额退款 - PaymentIntent: {txn_id}")
+                logger.info(f"创建全额退款 - PaymentIntent: {payment_intent_id}")
 
             # 如果提供了退款原因
             if reason:
@@ -333,7 +351,7 @@ class StripeAdapter(ProviderAdapter):
             )
 
             return {
-                "success": bool(session.status == 'expired'),
+                "success": bool(session.status == "expired"),
                 "session_id": session.id,
                 "status": session.status,  # 应该是 'expired'
             }
@@ -350,7 +368,9 @@ class StripeAdapter(ProviderAdapter):
                 "message": "Checkout Session 无法取消（可能已完成或状态不允许）",
             }
         except stripe.error.StripeError as e:
-            logger.error(f"取消 Checkout Session 失败 - ID: {provider_txn_id}, 错误: {traceback.format_exc()}")
+            logger.error(
+                f"取消 Checkout Session 失败 - ID: {provider_txn_id}, 错误: {traceback.format_exc()}"
+            )
             raise ValueError(f"Stripe 取消支付失败: {str(e)}")
 
     async def get_refund(self, refund_id: str) -> dict:
@@ -402,6 +422,8 @@ class StripeAdapter(ProviderAdapter):
         - checkout.session.async_payment_succeeded: 异步支付成功（Alipay等）
         - checkout.session.async_payment_failed: 异步支付失败
         - checkout.session.expired: Session 过期（网关统一视为 canceled）
+        - refund.updated: 退款状态更新
+        - refund.failed: 退款失败
 
         Args:
             headers: HTTP 请求头
@@ -436,16 +458,22 @@ class StripeAdapter(ProviderAdapter):
         event_data = event["data"]["object"]
         provider_event_id = event["id"]
 
-        logger.info(f"收到Stripe Webhook事件 - 类型: {event_type}, ID: {provider_event_id}")
-
-        if not event_type.startswith("checkout.session"):
-            logger.warning(f"忽略非 Checkout 事件类型: {event_type}")
-            raise ValueError(f"Unsupported Stripe event type: {event_type}")
-
-        # 仅处理 Checkout Session 事件
-        provider_txn_id, merchant_order_no, outcome = self._parse_checkout_event(
-            event_type, event_data
+        logger.info(
+            f"收到Stripe Webhook事件 - 类型: {event_type}, ID: {provider_event_id}"
         )
+
+        if event_type.startswith("checkout.session"):
+            # Checkout Session 事件
+            provider_txn_id, merchant_order_no, outcome = self._parse_checkout_event(
+                event_type, event_data
+            )
+        elif event_type in {"refund.updated", "refund.failed"}:
+            # Refund 事件
+            provider_txn_id, merchant_order_no, outcome = self._parse_refund_event(
+                event_type, event_data
+            )
+        else:
+            raise IgnoredException(f"忽略非支持事件类型: {event_type}")
 
         logger.info(
             f"Webhook 事件解析完成 - 结果: {outcome}, "
@@ -486,6 +514,27 @@ class StripeAdapter(ProviderAdapter):
                 "checkout.session.expired": "canceled",
             }
             outcome = outcome_map.get(event_type, "unknown")
+
+        return provider_txn_id, merchant_order_no, outcome
+
+    def _parse_refund_event(
+        self, event_type: str, event_data: dict
+    ) -> tuple[str | None, str | None, str]:
+        # Refund 事件
+        provider_txn_id = event_data.get("payment_intent") or event_data.get("charge")
+        merchant_order_no = event_data.get("metadata", {}).get("merchant_order_no")
+        refund_status = event_data.get("status")
+
+        if event_type == "refund.failed":
+            outcome = "refund_failed"
+        else:
+            outcome_map = {
+                "succeeded": "refund_succeeded",
+                "failed": "refund_failed",
+                "pending": "refund_pending",
+                "canceled": "refund_canceled",
+            }
+            outcome = outcome_map.get(refund_status, "refund_unknown")
 
         return provider_txn_id, merchant_order_no, outcome
 

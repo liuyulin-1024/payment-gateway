@@ -57,7 +57,7 @@ class RefundService:
             raise NotFoundException(
                 message="支付记录不存在",
                 code=4043,
-                details={"payment_id": str(req.payment_id)}
+                details={"payment_id": str(req.payment_id)},
             )
 
         # 2. 检查支付状态（必须是成功状态）
@@ -66,7 +66,10 @@ class RefundService:
             raise BadRequestException(
                 message=f"支付状态必须为成功状态，当前状态为：{payment.status.value}",
                 code=4001,
-                details={"payment_id": str(req.payment_id), "status": payment.status.value}
+                details={
+                    "payment_id": str(req.payment_id),
+                    "status": payment.status.value,
+                },
             )
 
         # 3. 计算退款金额
@@ -88,8 +91,8 @@ class RefundService:
                     code=4002,
                     details={
                         "refund_amount": refund_amount,
-                        "payment_amount": payment.amount
-                    }
+                        "payment_amount": payment.amount,
+                    },
                 )
 
         # 4. 检查累计退款金额
@@ -114,8 +117,8 @@ class RefundService:
                     "total_refunded": total_refunded,
                     "new_refund": refund_amount,
                     "total": total_refunded + refund_amount,
-                    "payment_amount": payment.amount
-                }
+                    "payment_amount": payment.amount,
+                },
             )
 
         # 5. 调用支付渠道退款接口
@@ -127,9 +130,9 @@ class RefundService:
                 from gateway.providers.stripe import get_stripe_adapter
 
                 stripe_adapter = get_stripe_adapter()
-
                 refund_result = await stripe_adapter.create_refund(
-                    payment_intent_id=payment.provider_txn_id,
+                    merchant_order_no=payment.merchant_order_no,
+                    txn_id=payment.provider_txn_id,
                     refund_amount=refund_amount,
                     reason=req.reason,
                 )
@@ -157,7 +160,7 @@ class RefundService:
                 raise ServiceUnavailableException(
                     message="支付宝退款功能尚未实现",
                     code=5031,
-                    details={"provider": "alipay"}
+                    details={"provider": "alipay"},
                 )
 
             elif payment.provider == Provider.wechatpay:
@@ -166,7 +169,7 @@ class RefundService:
                 raise ServiceUnavailableException(
                     message="微信支付退款功能尚未实现",
                     code=5032,
-                    details={"provider": "wechatpay"}
+                    details={"provider": "wechatpay"},
                 )
 
             else:
@@ -174,7 +177,7 @@ class RefundService:
                 raise BadRequestException(
                     message=f"不支持的支付渠道: {payment.provider.value}",
                     code=4004,
-                    details={"provider": payment.provider.value}
+                    details={"provider": payment.provider.value},
                 )
 
         except (BadRequestException, ServiceUnavailableException):
@@ -182,9 +185,7 @@ class RefundService:
         except Exception as e:
             log.error("退款创建失败", error=str(e))
             raise InternalServerException(
-                message="退款创建失败",
-                code=5001,
-                details={"error": str(e)}
+                message="退款创建失败", code=5001, details={"error": str(e)}
             )
 
         # 6. 创建退款记录
@@ -204,7 +205,9 @@ class RefundService:
         await self.session.commit()
         await self.session.refresh(refund)
 
-        log.info("退款记录创建完成", refund_id=str(refund.id), status=refund.status.value)
+        log.info(
+            "退款记录创建完成", refund_id=str(refund.id), status=refund.status.value
+        )
 
         return refund
 
@@ -222,7 +225,7 @@ class RefundService:
             raise NotFoundException(
                 message="退款记录不存在",
                 code=4044,
-                details={"refund_id": str(refund_id)}
+                details={"refund_id": str(refund_id)},
             )
 
         log.info("退款记录已找到", status=refund.status.value)
@@ -280,7 +283,7 @@ class RefundService:
             raise NotFoundException(
                 message="退款记录不存在",
                 code=4045,
-                details={"refund_id": str(refund_id)}
+                details={"refund_id": str(refund_id)},
             )
 
         # 2. 如果已经是最终状态，无需同步
@@ -298,7 +301,7 @@ class RefundService:
             raise BadRequestException(
                 message="退款记录没有渠道退款ID",
                 code=4005,
-                details={"refund_id": str(refund_id)}
+                details={"refund_id": str(refund_id)},
             )
 
         try:
@@ -339,7 +342,7 @@ class RefundService:
                 raise ServiceUnavailableException(
                     message=f"渠道 {refund.provider.value} 不支持状态同步",
                     code=5033,
-                    details={"provider": refund.provider.value}
+                    details={"provider": refund.provider.value},
                 )
 
         except (BadRequestException, ServiceUnavailableException, NotFoundException):
@@ -347,9 +350,7 @@ class RefundService:
         except Exception as e:
             log.error("退款状态同步失败", error=str(e))
             raise InternalServerException(
-                message="退款状态同步失败",
-                code=5002,
-                details={"error": str(e)}
+                message="退款状态同步失败", code=5002, details={"error": str(e)}
             )
 
         return refund

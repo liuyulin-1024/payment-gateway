@@ -20,8 +20,8 @@ from gateway.providers.alipay import get_alipay_adapter
 adapter = get_alipay_adapter()
 currency = "CNY"
 order_no = "test009"
-product_name = 'test'
-product_desc = 'test desc'
+product_name = "test"
+product_desc = "test desc"
 
 
 async def test_payment():
@@ -31,7 +31,7 @@ async def test_payment():
         product_name=product_name,
         product_desc=product_desc,
         currency=currency,
-        metadata={'customer_email': 'test@autogame.ai'},
+        metadata={"customer_email": "test@autogame.ai"},
         merchant_order_no=order_no,
         notify_url="https://brandie-hagiolatrous-daina.ngrok-free.dev/v1/callbacks/alipay",
         expire_minutes=30,

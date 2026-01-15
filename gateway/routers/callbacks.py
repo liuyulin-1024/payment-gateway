@@ -11,6 +11,8 @@ from gateway.core.constants import Provider
 from gateway.providers.stripe import get_stripe_adapter
 from gateway.providers.alipay import get_alipay_adapter
 from gateway.services.callbacks import CallbackService
+from gateway.core.exceptions import IgnoredException
+
 
 logger = structlog.get_logger(__name__)
 
@@ -42,7 +44,9 @@ async def stripe_callback(
         await callback_service.process_callback(event)
 
         return Response(status_code=200)
-
+    except IgnoredException as err:
+        logger.warning(str(err))
+        return Response(status_code=200)
     except Exception as exc:
         log.error("回调处理失败", error=str(exc), exc_info=True)
         return Response(status_code=500)

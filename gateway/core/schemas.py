@@ -43,7 +43,9 @@ class CreatePaymentRequest(BaseModel):
     provider: Provider = Field(..., description="支付渠道")
     currency: Currency = Field(..., description="币种")
     quantity: int = Field(..., gt=0, description="商品数量")
-    unit_amount: int | None = Field(None, gt=0, description="单价（最小货币单位，如分）")
+    unit_amount: int | None = Field(
+        None, gt=0, description="单价（最小货币单位，如分）"
+    )
     product_name: str | None = Field(None, max_length=250, description="商品名称")
     product_desc: str | None = Field(None, max_length=500, description="商品描述")
     notify_url: str | None = Field(
@@ -53,8 +55,12 @@ class CreatePaymentRequest(BaseModel):
         None, gt=0, le=1440, description="过期时间（分钟）"
     )
     # 可选参数
-    success_url: str | None = Field(None, max_length=2048, description="支付成功跳转 URL")
-    cancel_url: str | None = Field(None, max_length=2048, description="取消支付跳转 URL")
+    success_url: str | None = Field(
+        None, max_length=2048, description="支付成功跳转 URL"
+    )
+    cancel_url: str | None = Field(
+        None, max_length=2048, description="取消支付跳转 URL"
+    )
     metadata: dict[str, Any] | None = Field(None, description="额外的元数据")
 
 
@@ -115,9 +121,7 @@ class CancelPaymentResponse(BaseModel):
     payment_id: UUID = Field(..., description="支付 ID")
     merchant_order_no: str = Field(..., description="商户订单号")
     status: PaymentStatus = Field(..., description="支付状态")
-    provider_result: dict[str, Any] | None = Field(
-        None, description="支付渠道返回结果"
-    )
+    provider_result: dict[str, Any] | None = Field(None, description="支付渠道返回结果")
 
 
 # ===== 渠道回调（内部处理，无需公开 schema） =====

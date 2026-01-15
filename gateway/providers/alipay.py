@@ -93,7 +93,7 @@ class AlipayAdapter(ProviderAdapter):
             "total_amount": total_amount,
             "subject": (product_name or "商品")[:256],  # 商品标题
         }
-        
+
         # 商品描述（可选）
         if product_desc:
             biz_content["body"] = product_desc[:128]

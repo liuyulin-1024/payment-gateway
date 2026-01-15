@@ -23,7 +23,11 @@ from gateway.core.responses import success_response
 from gateway.services.callbacks import CallbackService
 from gateway.core.constants import PaymentStatus, Provider
 from gateway.core.schemas import CreateAppRequest, AppResponse, AppListResponse
-from gateway.core.exceptions import NotFoundException, BadRequestException, InternalServerException
+from gateway.core.exceptions import (
+    NotFoundException,
+    BadRequestException,
+    InternalServerException,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -53,7 +57,9 @@ async def create_app(
 
     log.info("应用创建成功", app_id=str(app.id))
     response_data = AppResponse.model_validate(app)
-    return success_response(data=response_data.model_dump(mode='json'), msg="应用创建成功", status_code=201)
+    return success_response(
+        data=response_data.model_dump(mode="json"), msg="应用创建成功", status_code=201
+    )
 
 
 @router.get("/apps")
@@ -79,7 +85,7 @@ async def list_apps(
     response_data = AppListResponse(
         total=total, items=[AppResponse.model_validate(app) for app in apps]
     )
-    return success_response(data=response_data.model_dump(mode='json'), msg="查询成功")
+    return success_response(data=response_data.model_dump(mode="json"), msg="查询成功")
 
 
 @router.get("/apps/{app_id}")
@@ -99,7 +105,7 @@ async def get_app(
 
     logger.info("应用详情查询成功", app_id=str(app_id))
     response_data = AppResponse.model_validate(app)
-    return success_response(data=response_data.model_dump(mode='json'), msg="查询成功")
+    return success_response(data=response_data.model_dump(mode="json"), msg="查询成功")
 
 
 @router.delete("/apps/{app_id}")
@@ -141,7 +147,9 @@ async def update_app_status(
 
     logger.info("应用状态更新成功", app_id=str(app_id), is_active=is_active)
     response_data = AppResponse.model_validate(app)
-    return success_response(data=response_data.model_dump(mode='json'), msg="应用状态更新成功")
+    return success_response(
+        data=response_data.model_dump(mode="json"), msg="应用状态更新成功"
+    )
 
 
 @router.post("/payments/{payment_id}/test-success", summary="模拟支付成功")
@@ -186,9 +194,7 @@ async def test_payment_success(
     if not payment:
         log.warning("未找到支付记录")
         raise NotFoundException(
-            message="支付记录不存在",
-            code=4046,
-            details={"payment_id": str(payment_id)}
+            message="支付记录不存在", code=4046, details={"payment_id": str(payment_id)}
         )
 
     # 2. 检查当前状态
@@ -200,7 +206,7 @@ async def test_payment_success(
                 "status": payment.status.value,
                 "paid_at": payment.paid_at.isoformat() if payment.paid_at else None,
             },
-            msg="支付已经成功"
+            msg="支付已经成功",
         )
 
     # 3. 检查支付渠道
@@ -214,7 +220,7 @@ async def test_payment_success(
                 raise BadRequestException(
                     message="支付记录缺少渠道交易ID，无法在Stripe测试",
                     code=4006,
-                    details={"payment_id": str(payment_id)}
+                    details={"payment_id": str(payment_id)},
                 )
             from gateway.providers.stripe import get_stripe_adapter
 
@@ -225,7 +231,7 @@ async def test_payment_success(
             raise BadRequestException(
                 message=f"测试接口仅支持 Stripe，当前为 {payment.provider.value}",
                 code=4007,
-                details={"provider": payment.provider.value}
+                details={"provider": payment.provider.value},
             )
 
     # 6. 构造标准化的 CallbackEvent（基于真实的 Stripe 状态）
@@ -264,9 +270,7 @@ async def test_payment_success(
     except Exception as e:
         log.error("回调处理失败", error=str(e))
         raise InternalServerException(
-            message="回调处理失败",
-            code=5003,
-            details={"error": str(e)}
+            message="回调处理失败", code=5003, details={"error": str(e)}
         )
 
     # 8. 刷新支付记录以获取最新状态
@@ -289,16 +293,14 @@ async def test_payment_success(
             "paid_at": payment.paid_at.isoformat() if payment.paid_at else None,
             "test_mode": True,
         },
-        msg="支付测试成功"
+        msg="支付测试成功",
     )
 
 
 # ===== 退款管理 API =====
 
 
-@router.post(
-    "/refunds", status_code=201, summary="创建退款"
-)
+@router.post("/refunds", status_code=201, summary="创建退款")
 async def create_refund(
     req: CreateRefundRequest,
     session: AsyncSession = Depends(get_session),
@@ -355,12 +357,12 @@ async def create_refund(
 
     log.info("退款创建成功", refund_id=str(refund.id))
     response_data = RefundResponse.model_validate(refund)
-    return success_response(data=response_data.model_dump(mode='json'), msg="退款创建成功", status_code=201)
+    return success_response(
+        data=response_data.model_dump(mode="json"), msg="退款创建成功", status_code=201
+    )
 
 
-@router.get(
-    "/refunds/{refund_id}", summary="查询退款详情"
-)
+@router.get("/refunds/{refund_id}", summary="查询退款详情")
 async def get_refund(
     refund_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
@@ -383,7 +385,7 @@ async def get_refund(
 
     logger.info("退款详情查询成功", refund_id=str(refund_id))
     response_data = RefundResponse.model_validate(refund)
-    return success_response(data=response_data.model_dump(mode='json'), msg="查询成功")
+    return success_response(data=response_data.model_dump(mode="json"), msg="查询成功")
 
 
 @router.get(
@@ -424,12 +426,10 @@ async def list_refunds_by_payment(
     response_data = RefundListResponse(
         total=total, items=[RefundResponse.model_validate(refund) for refund in refunds]
     )
-    return success_response(data=response_data.model_dump(mode='json'), msg="查询成功")
+    return success_response(data=response_data.model_dump(mode="json"), msg="查询成功")
 
 
-@router.post(
-    "/refunds/{refund_id}/sync", summary="同步退款状态"
-)
+@router.post("/refunds/{refund_id}/sync", summary="同步退款状态")
 async def sync_refund_status(
     refund_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
@@ -466,4 +466,6 @@ async def sync_refund_status(
         status=refund.status.value,
     )
     response_data = RefundResponse.model_validate(refund)
-    return success_response(data=response_data.model_dump(mode='json'), msg="状态同步成功")
+    return success_response(
+        data=response_data.model_dump(mode="json"), msg="状态同步成功"
+    )

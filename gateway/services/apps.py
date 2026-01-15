@@ -10,7 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.models import App
 from gateway.core.schemas import CreateAppRequest
-from gateway.core.exceptions import NotFoundException, BadRequestException, InternalServerException
+from gateway.core.exceptions import (
+    NotFoundException,
+    BadRequestException,
+    InternalServerException,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -55,7 +59,7 @@ class AppService:
             raise BadRequestException(
                 message=f"应用名称 '{req.name}' 已存在",
                 code=4008,
-                details={"name": req.name}
+                details={"name": req.name},
             )
 
         # 生成唯一的 API Key
@@ -136,9 +140,7 @@ class AppService:
 
         if app is None:
             raise NotFoundException(
-                message="应用不存在",
-                code=4047,
-                details={"app_id": str(app_id)}
+                message="应用不存在", code=4047, details={"app_id": str(app_id)}
             )
 
         return app

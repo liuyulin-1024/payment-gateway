@@ -17,7 +17,11 @@ from gateway.core.auth import get_app_from_api_key
 from gateway.services.payments import PaymentService
 from gateway.services.refunds import RefundService
 from gateway.core.exceptions import PaymentProviderException
-from gateway.core.responses import success_response, bad_request_response, validation_error_response
+from gateway.core.responses import (
+    success_response,
+    bad_request_response,
+    validation_error_response,
+)
 from gateway.core.schemas import (
     CreatePaymentRequest,
     CreatePaymentResponse,
@@ -109,7 +113,9 @@ async def create_payment(
             type=result.type,
             payload=result.payload,
         )
-        return success_response(data=response_data.model_dump(mode='json'), msg="创建支付成功")
+        return success_response(
+            data=response_data.model_dump(mode="json"), msg="创建支付成功"
+        )
     else:
         # 幂等返回：需要重新生成 payload（简化：返回空 payload）
         log.info("支付幂等返回", payment_id=str(payment.id))
@@ -122,7 +128,9 @@ async def create_payment(
             type="redirect",  # 占位
             payload={"message": "Payment already exists"},
         )
-        return success_response(data=response_data.model_dump(mode='json'), msg="支付已存在（幂等返回）")
+        return success_response(
+            data=response_data.model_dump(mode="json"), msg="支付已存在（幂等返回）"
+        )
 
 
 @router.post("/payments/cancel")
@@ -149,7 +157,9 @@ async def cancel_payment(
     payment = await payment_service.get_payment_by_id(app, req.payment_id)
 
     if payment.merchant_order_no != req.merchant_order_no:
-        return validation_error_response('参数不匹配，请检查 merchant_order_no、payment_id')
+        return validation_error_response(
+            "参数不匹配，请检查 merchant_order_no、payment_id"
+        )
 
     if payment.status == PaymentStatus.canceled:
         response_data = CancelPaymentResponse(
@@ -158,10 +168,12 @@ async def cancel_payment(
             status=payment.status,
             provider_result=None,
         )
-        return success_response(data=response_data.model_dump(mode='json'), msg="订单已取消")
+        return success_response(
+            data=response_data.model_dump(mode="json"), msg="订单已取消"
+        )
 
     if payment.status in (PaymentStatus.succeeded, PaymentStatus.failed):
-        return bad_request_response('当前支付状态不可取消')
+        return bad_request_response("当前支付状态不可取消")
 
     provider_adapter = get_adapter(payment.provider)
 
@@ -194,7 +206,7 @@ async def cancel_payment(
         status=payment.status,
         provider_result=provider_result,
     )
-    return success_response(data=response_data.model_dump(mode='json'), msg="取消成功")
+    return success_response(data=response_data.model_dump(mode="json"), msg="取消成功")
 
 
 @router.get("/payments/{payment_id}")
@@ -212,7 +224,7 @@ async def get_payment_by_id(
     payment_service = PaymentService(session)
     payment = await payment_service.get_payment_by_id(app, payment_id)
     response_data = PaymentResponse.model_validate(payment)
-    return success_response(data=response_data.model_dump(mode='json'), msg="查询成功")
+    return success_response(data=response_data.model_dump(mode="json"), msg="查询成功")
 
 
 @router.get("/payments/by-merchant-order/{merchant_order_no}")
@@ -232,7 +244,7 @@ async def get_payment_by_merchant_order_no(
         app, merchant_order_no
     )
     response_data = PaymentResponse.model_validate(payment)
-    return success_response(data=response_data.model_dump(mode='json'), msg="查询成功")
+    return success_response(data=response_data.model_dump(mode="json"), msg="查询成功")
 
 
 @router.post("/refunds", status_code=201)
@@ -261,7 +273,7 @@ async def create_refund(
     log.info("退款创建成功", refund_id=str(refund.id))
     response_data = RefundResponse.model_validate(refund)
     return success_response(
-        data=response_data.model_dump(mode='json'),
+        data=response_data.model_dump(mode="json"),
         msg="退款创建成功",
         status_code=201,
     )
@@ -290,7 +302,7 @@ async def get_refund(
     await payment_service.get_payment_by_id(app, refund.payment_id)
 
     response_data = RefundResponse.model_validate(refund)
-    return success_response(data=response_data.model_dump(mode='json'), msg="查询成功")
+    return success_response(data=response_data.model_dump(mode="json"), msg="查询成功")
 
 
 @router.get("/payments/{payment_id}/refunds")
@@ -324,7 +336,7 @@ async def list_refunds_by_payment(
     response_data = RefundListResponse(
         total=total, items=[RefundResponse.model_validate(refund) for refund in refunds]
     )
-    return success_response(data=response_data.model_dump(mode='json'), msg="查询成功")
+    return success_response(data=response_data.model_dump(mode="json"), msg="查询成功")
 
 
 @router.post("/refunds/{refund_id}/sync")
@@ -352,4 +364,6 @@ async def sync_refund_status(
     refund = await refund_service.sync_refund_status(refund_id)
 
     response_data = RefundResponse.model_validate(refund)
-    return success_response(data=response_data.model_dump(mode='json'), msg="状态同步成功")
+    return success_response(
+        data=response_data.model_dump(mode="json"), msg="状态同步成功"
+    )

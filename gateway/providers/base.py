@@ -39,7 +39,7 @@ class ProviderAdapter(ABC):
     def supported_flows(self) -> list[PaymentFlowType]:
         """
         当前 provider 支持的支付流程类型
-        
+
         子类可以重写此方法声明支持的流程
         默认只支持 HOSTED 流程
         """
@@ -61,12 +61,12 @@ class ProviderAdapter(ABC):
     ) -> ProviderPaymentResult:
         """
         创建支付（统一入口）
-        
+
         这是主要的支付创建方法，适用于：
         - Stripe Checkout Session（托管页面）
         - Alipay 电脑网站支付（Form 表单）
         - WeChat Native 支付（二维码）
-        
+
         参数：
             currency: 货币代码（如 USD, CNY）
             merchant_order_no: 商户订单号
@@ -77,7 +77,7 @@ class ProviderAdapter(ABC):
             product_name: 商品名称
             product_desc: 商品描述
             **kwargs: 额外参数（如 success_url, cancel_url, metadata）
-        
+
         返回：
             ProviderPaymentResult:
                 - type: 支付类型（url/form/qr）
@@ -91,6 +91,7 @@ class ProviderAdapter(ABC):
         self,
         *,
         txn_id: str,
+        merchant_order_no: str,
         refund_amount: int | None = None,
         reason: str | None = None,
     ) -> dict:

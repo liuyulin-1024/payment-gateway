@@ -1,6 +1,7 @@
 """
 Callback 处理服务（入站回调 -> 落库 -> 推进 Payment -> 生成 WebhookDelivery）
 """
+
 import traceback
 import uuid
 from datetime import datetime, UTC
@@ -10,8 +11,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
-from gateway.core.constants import CallbackStatus, PaymentStatus, DeliveryStatus
-from gateway.core.models import App, Callback, Payment, WebhookDelivery
+from gateway.core.constants import (
+    CallbackStatus,
+    PaymentStatus,
+    DeliveryStatus,
+    RefundStatus,
+    Provider,
+)
+from gateway.core.models import App, Callback, Payment, WebhookDelivery, Refund
 from gateway.core.schemas import CallbackEvent
 
 logger = structlog.get_logger(__name__)
@@ -54,11 +61,86 @@ class CallbackService:
             return
 
         payment_id = payment.id
-
         # 关联 callback -> payment
         callback.payment_id = payment_id
 
-        # 3. 推进 Payment 状态（加锁）
+        # 退款回调
+        if event.outcome.startswith("refund_"):
+            await self._process_refund_callback(payment, event, callback, log)
+        # 支付回调
+        else:
+            await self._process_payment_callback(payment, event, callback, log)
+
+    async def _process_refund_callback(
+        self, payment: Payment, event: CallbackEvent, callback: Callback, log
+    ):
+        """处理退款回调事件"""
+        refund_obj = event.raw_payload.get("data", {}).get("object", {})
+        provider_refund_id = refund_obj.get("id")
+
+        if not provider_refund_id:
+            log.warning("退款回调缺少退款ID")
+            callback.status = CallbackStatus.failed
+            await self.session.commit()
+            return
+
+        provider_value = event.raw_payload.get("provider")
+        provider = None
+        if provider_value:
+            try:
+                provider = Provider(provider_value)
+            except ValueError:
+                log.warning("未知的退款回调渠道", provider=provider_value)
+
+        stmt = select(Refund).where(Refund.provider_refund_id == provider_refund_id)
+        if provider:
+            stmt = stmt.where(Refund.provider == provider)
+
+        result = await self.session.execute(stmt)
+        refund = result.scalar_one_or_none()
+
+        if not refund:
+            log.warning("未找到回调对应的退款", provider_refund_id=provider_refund_id)
+            callback.status = CallbackStatus.failed
+            await self.session.commit()
+            return
+
+        # 关联 callback -> payment（便于追踪）
+        callback.payment_id = refund.payment_id
+
+        await self.session.refresh(refund, with_for_update=True)
+
+        outcome_map = {
+            "refund_succeeded": RefundStatus.succeeded,
+            "refund_failed": RefundStatus.failed,
+            "refund_pending": RefundStatus.pending,
+            "refund_canceled": RefundStatus.canceled,
+        }
+        new_status = outcome_map.get(event.outcome)
+
+        if new_status and new_status != refund.status:
+            refund.status = new_status
+            if new_status == RefundStatus.succeeded and not refund.refunded_at:
+                refund.refunded_at = datetime.now(UTC)
+
+        if not refund.provider_refund_id:
+            refund.provider_refund_id = provider_refund_id
+
+        # 生成 WebhookDelivery
+        if new_status:
+            await self._create_refund_webhook_delivery(payment, refund, new_status)
+
+        callback.status = CallbackStatus.processed
+        callback.processed_at = datetime.now(UTC)
+        await self.session.commit()
+        log.info("退款回调处理完成", refund_id=str(refund.id))
+
+    async def _process_payment_callback(
+        self, payment: Payment, event: CallbackEvent, callback: Callback, log
+    ):
+
+        # 推进 Payment 状态（加锁）
+        payment_id = str(payment.id)
         await self.session.refresh(payment, with_for_update=True)
 
         old_status = payment.status
@@ -74,8 +156,8 @@ class CallbackService:
                 payment.paid_at = datetime.now(UTC)
 
             log.info(
-                "回调推进支付状态",
-                payment_id=str(payment_id),
+                "支付回调推进支付状态",
+                payment_id=payment_id,
                 old_status=old_status.value,
                 new_status=new_status.value,
             )
@@ -86,14 +168,14 @@ class CallbackService:
             PaymentStatus.failed,
             PaymentStatus.canceled,
         ]:
-            await self._create_webhook_delivery(payment, new_status)
+            await self._create_payment_webhook_delivery(payment, new_status)
 
         # 标记 callback 已处理
         callback.status = CallbackStatus.processed
         callback.processed_at = datetime.now(UTC)
 
         await self.session.commit()
-        log.info("回调处理完成", payment_id=str(payment_id))
+        log.info("支付回调处理完成", payment_id=payment_id)
 
     async def _upsert_callback(self, event: CallbackEvent) -> Callback:
         """写入 callback（幂等）"""
@@ -162,12 +244,15 @@ class CallbackService:
         return outcome_map.get(outcome)
 
     async def _create_webhook_delivery(
-        self, payment: Payment, event_status: PaymentStatus
+        self,
+        payment: Payment,
+        *,
+        event_id: str,
+        event_type: str,
+        payload: dict,
+        path_suffix: str,
     ):
         """生成 WebhookDelivery 任务"""
-        event_id = f"{payment.id}_{event_status.value}"
-        event_type = f"payment.{event_status.value}"
-
         notify_url = payment.notify_url
         if not notify_url:
             stmt = select(App.notify_url).where(App.id == payment.app_id)
@@ -182,16 +267,12 @@ class CallbackService:
             )
             return
 
+        notify_url = notify_url.rstrip("/") + path_suffix
+
         payload = {
             "event_id": event_id,
             "event_type": event_type,
-            "payment_id": str(payment.id),
-            "merchant_order_no": payment.merchant_order_no,
-            "status": payment.status.value,
-            "amount": payment.amount,
-            "currency": payment.currency.value,
-            "provider_txn_id": payment.provider_txn_id,
-            "paid_at": payment.paid_at.isoformat() if payment.paid_at else None,
+            **payload,
         }
 
         stmt = select(WebhookDelivery).where(
@@ -237,4 +318,48 @@ class CallbackService:
             "Webhook投递任务已创建",
             delivery_id=str(delivery.id),
             event_id=event_id,
+        )
+
+    async def _create_payment_webhook_delivery(
+        self, payment: Payment, event_status: PaymentStatus
+    ):
+        """生成支付回调 WebhookDelivery 任务"""
+        await self._create_webhook_delivery(
+            payment,
+            event_id=f"{payment.id}_{event_status.value}",
+            event_type=f"payment.{event_status.value}",
+            payload={
+                "payment_id": str(payment.id),
+                "merchant_order_no": payment.merchant_order_no,
+                "status": payment.status.value,
+                "amount": payment.amount,
+                "currency": payment.currency.value,
+                "provider_txn_id": payment.provider_txn_id,
+                "paid_at": payment.paid_at.isoformat() if payment.paid_at else None,
+            },
+            path_suffix="/callback/payment",
+        )
+
+    async def _create_refund_webhook_delivery(
+        self, payment: Payment, refund: Refund, event_status: RefundStatus
+    ):
+        """生成退款回调 WebhookDelivery 任务"""
+        await self._create_webhook_delivery(
+            payment,
+            event_id=f"{refund.id}_{event_status.value}",
+            event_type=f"refund.{event_status.value}",
+            payload={
+                "refund_id": str(refund.id),
+                "payment_id": str(payment.id),
+                "merchant_order_no": payment.merchant_order_no,
+                "status": refund.status.value,
+                "refund_amount": refund.refund_amount,
+                "provider_refund_id": refund.provider_refund_id,
+                "refunded_at": (
+                    refund.refunded_at.isoformat() if refund.refunded_at else None
+                ),
+                "reason": refund.reason,
+                "currency": payment.currency.value,
+            },
+            path_suffix="/callback/refund",
         )

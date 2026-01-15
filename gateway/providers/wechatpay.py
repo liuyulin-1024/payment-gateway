@@ -113,7 +113,9 @@ class WeChatPayAdapter(ProviderAdapter):
         body = {
             "appid": self.appid,
             "mchid": self.mchid,
-            "description": (product_name or product_desc or "商品")[:127],  # 最大 127 字符
+            "description": (product_name or product_desc or "商品")[
+                :127
+            ],  # 最大 127 字符
             "out_trade_no": merchant_order_no,
             "notify_url": notify_url,
             "amount": {
@@ -157,9 +159,9 @@ class WeChatPayAdapter(ProviderAdapter):
     ) -> dict:
         """
         创建微信支付退款
-        
+
         参考：https://pay.weixin.qq.com/doc/v3/merchant/4012791877
-        
+
         注意：完整实现需要调用微信退款API，这里是占位实现
         """
         # TODO: 实现微信支付退款逻辑

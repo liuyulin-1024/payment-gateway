@@ -22,11 +22,11 @@ adapter = get_stripe_adapter()
 quantity = 1
 unit_amount = 1000
 currency = "CNY"
-customer_name = 'test'
-customer_email = 'test@example.com'
+customer_name = "test"
+customer_email = "test@example.com"
 merchant_order_no = "test00009"
-product_name = 'test'
-product_desc = 'test desc'
+product_name = "test"
+product_desc = "test desc"
 
 
 async def test_session():
@@ -50,11 +50,16 @@ async def test_session():
     print("测试2：自动支付方式（由 Stripe 选择）")
     print("=" * 80)
     result2 = await adapter.create_payment(
-        currency=currency, merchant_order_no=merchant_order_no,
+        currency=currency,
+        merchant_order_no=merchant_order_no,
         notify_url="https://brandie-hagiolatrous-daina.ngrok-free.dev/v1/callbacks/stripe",
-        quantity=quantity, unit_amount=unit_amount, expire_minutes=30, product_name="测试商品", product_desc="商品描述",
+        quantity=quantity,
+        unit_amount=unit_amount,
+        expire_minutes=30,
+        product_name="测试商品",
+        product_desc="商品描述",
         metadata={
-            'customer_email':customer_email,
+            "customer_email": customer_email,
             "customer_name": customer_name,
             "merchant_order_no": merchant_order_no,
         },
@@ -83,7 +88,10 @@ async def create_checkout_session():
             }
         ],
         "customer_email": customer_email,
-        "metadata": {"customer_name": customer_name, "merchant_order_no": merchant_order_no},
+        "metadata": {
+            "customer_name": customer_name,
+            "merchant_order_no": merchant_order_no,
+        },
         # 将 metadata 同时传递到 PaymentIntent，确保在 payment_intent.* 事件中也能获取到
         "payment_intent_data": {
             "metadata": {
@@ -110,9 +118,7 @@ async def create_checkout_session():
     # 微信支付需要额外配置 payment_method_options
     if include_wechat_pay:
         session_data["payment_method_options"] = {
-            "wechat_pay": {
-                "client": "web"  # 'web' 用于网页端，'mobile' 用于移动端
-            }
+            "wechat_pay": {"client": "web"}  # 'web' 用于网页端，'mobile' 用于移动端
         }
         print("微信支付客户端类型: web")
 

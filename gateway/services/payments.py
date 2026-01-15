@@ -58,7 +58,7 @@ class PaymentService:
         if existing:
             # 计算请求的总金额
             request_total_amount = (req.unit_amount or 0) * req.quantity
-            
+
             # 幂等检查：验证关键字段是否一致
             if (
                 existing.amount != request_total_amount
@@ -88,8 +88,8 @@ class PaymentService:
                             "amount": request_total_amount,
                             "currency": req.currency.value,
                             "provider": req.provider.value,
-                        }
-                    }
+                        },
+                    },
                 )
 
             log.info("幂等命中返回已有支付", payment_id=str(existing.id))
@@ -97,7 +97,7 @@ class PaymentService:
 
         # 计算总金额（单价 * 数量）
         total_amount = (req.unit_amount or 0) * req.quantity
-        
+
         # 创建新支付
         payment = Payment(
             id=uuid.uuid4(),
@@ -124,7 +124,7 @@ class PaymentService:
             raise ConflictException(
                 message="支付创建并发冲突，请重试",
                 code=4092,
-                details={"error": str(exc)}
+                details={"error": str(exc)},
             )
 
     async def get_payment_by_id(self, app: App, payment_id: uuid.UUID) -> Payment:
@@ -140,7 +140,7 @@ class PaymentService:
             raise NotFoundException(
                 message="支付记录不存在",
                 code=4041,
-                details={"payment_id": str(payment_id)}
+                details={"payment_id": str(payment_id)},
             )
 
         return payment
@@ -160,7 +160,7 @@ class PaymentService:
             raise NotFoundException(
                 message="支付记录不存在",
                 code=4042,
-                details={"merchant_order_no": merchant_order_no}
+                details={"merchant_order_no": merchant_order_no},
             )
 
         return payment
