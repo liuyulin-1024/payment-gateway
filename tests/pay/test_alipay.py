@@ -18,21 +18,26 @@ from gateway.providers.alipay import get_alipay_adapter
 
 
 adapter = get_alipay_adapter()
-order_no = "test008"
-amount = 10
+currency = "CNY"
+order_no = "test009"
+product_name = 'test'
+product_desc = 'test desc'
 
 
 async def test_payment():
     result = await adapter.create_payment(
-        amount=amount,
-        currency="CNY",
+        quantity=1,
+        unit_amount=5000,
+        product_name=product_name,
+        product_desc=product_desc,
+        currency=currency,
+        metadata={'customer_email': 'test@autogame.ai'},
         merchant_order_no=order_no,
-        description="pro 订阅",
         notify_url="https://brandie-hagiolatrous-daina.ngrok-free.dev/v1/callbacks/alipay",
         expire_minutes=30,
     )
     print("\n✅ 支付创建成功:")
-    print(f"   类型: {result.type}")
+    print(f"   类型: {result.model_dump()}")
 
     # 支付宝返回的是 HTML form，不是 URL
     html = result.payload.get("html", "N/A")

@@ -21,9 +21,12 @@ from gateway.providers.stripe import get_stripe_adapter
 adapter = get_stripe_adapter()
 quantity = 1
 unit_amount = 1000
+currency = "CNY"
 customer_name = 'test'
 customer_email = 'test@example.com'
-merchant_order_no = "test00001"
+merchant_order_no = "test00009"
+product_name = 'test'
+product_desc = 'test desc'
 
 
 async def test_session():
@@ -47,9 +50,9 @@ async def test_session():
     print("Test 2: Automatic payment methods (let Stripe decide)")
     print("=" * 80)
     result2 = await adapter.create_payment(
-        currency='CNY', merchant_order_no=merchant_order_no,
+        currency=currency, merchant_order_no=merchant_order_no,
         notify_url="https://brandie-hagiolatrous-daina.ngrok-free.dev/v1/callbacks/stripe",
-        quantity=1, unit_amount=1000, expire_minutes=30, product_name="测试商品", product_desc="商品描述",
+        quantity=quantity, unit_amount=unit_amount, expire_minutes=30, product_name="测试商品", product_desc="商品描述",
         metadata={
             'customer_email':customer_email,
             "customer_name": customer_name,

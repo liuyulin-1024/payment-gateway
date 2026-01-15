@@ -89,7 +89,18 @@ class WebhookDeliveryWorker:
             )
 
             for delivery in deliveries:
-                await self.deliver_webhook(session, delivery)
+                try:
+                    await self.deliver_webhook(session, delivery)
+                except Exception as exc:
+                    log = logger.bind(
+                        delivery_id=str(delivery.id),
+                        event_id=delivery.event_id,
+                        event_type=delivery.event_type,
+                        attempt_count=delivery.attempt_count,
+                    )
+                    delivery.last_http_status = None
+                    delivery.last_error = f"WorkerError: {str(exc)[:200]}"
+                    await self.schedule_retry(session, delivery, log)
 
     async def deliver_webhook(self, session: AsyncSession, delivery: WebhookDelivery):
         """投递单个 webhook"""

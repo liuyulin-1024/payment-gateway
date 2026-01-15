@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
 from gateway.core.constants import CallbackStatus, PaymentStatus, DeliveryStatus
-from gateway.core.models import Callback, Payment, WebhookDelivery
+from gateway.core.models import App, Callback, Payment, WebhookDelivery
 from gateway.core.schemas import CallbackEvent
 
 logger = structlog.get_logger(__name__)
@@ -47,15 +47,16 @@ class CallbackService:
 
         # 2. 定位 Payment
         payment = await self._find_payment(event)
-
         if not payment:
             log.warning("callback_payment_not_found")
             callback.status = CallbackStatus.failed
             await self.session.commit()
             return
 
+        payment_id = payment.id
+
         # 关联 callback -> payment
-        callback.payment_id = payment.id
+        callback.payment_id = payment_id
 
         # 3. 推进 Payment 状态（加锁）
         await self.session.refresh(payment, with_for_update=True)
@@ -74,7 +75,7 @@ class CallbackService:
 
             log.info(
                 "callback_payment_status_updated",
-                payment_id=str(payment.id),
+                payment_id=str(payment_id),
                 old_status=old_status.value,
                 new_status=new_status.value,
             )
@@ -92,7 +93,7 @@ class CallbackService:
         callback.processed_at = datetime.now(UTC)
 
         await self.session.commit()
-        log.info("callback_processing_completed", payment_id=str(payment.id))
+        log.info("callback_processing_completed", payment_id=str(payment_id))
 
     async def _upsert_callback(self, event: CallbackEvent) -> Callback:
         """写入 callback（幂等）"""
@@ -164,10 +165,22 @@ class CallbackService:
         self, payment: Payment, event_status: PaymentStatus
     ):
         """生成 WebhookDelivery 任务"""
-        event_id = (
-            f"{payment.id}_{event_status.value}_{int(datetime.now(UTC).timestamp())}"
-        )
+        event_id = f"{payment.id}_{event_status.value}"
         event_type = f"payment.{event_status.value}"
+
+        notify_url = payment.notify_url
+        if not notify_url:
+            stmt = select(App.notify_url).where(App.id == payment.app_id)
+            result = await self.session.execute(stmt)
+            notify_url = result.scalar_one_or_none()
+
+        if not notify_url:
+            logger.warning(
+                "webhook_delivery_missing_notify_url",
+                payment_id=str(payment.id),
+                app_id=str(payment.app_id),
+            )
+            return
 
         payload = {
             "event_id": event_id,
@@ -181,13 +194,37 @@ class CallbackService:
             "paid_at": payment.paid_at.isoformat() if payment.paid_at else None,
         }
 
+        stmt = select(WebhookDelivery).where(
+            WebhookDelivery.app_id == payment.app_id,
+            WebhookDelivery.event_id == event_id,
+        )
+        result = await self.session.execute(stmt)
+        existing = result.scalar_one_or_none()
+
+        if existing:
+            existing.notify_url = notify_url
+            existing.payload = payload
+            existing.status = DeliveryStatus.pending
+            existing.attempt_count = 0
+            existing.next_attempt_at = datetime.now(UTC)
+            existing.last_attempt_at = None
+            existing.last_http_status = None
+            existing.last_error = None
+            existing.delivered_at = None
+            logger.info(
+                "webhook_delivery_requeued",
+                delivery_id=str(existing.id),
+                event_id=event_id,
+            )
+            return
+
         delivery = WebhookDelivery(
             id=uuid.uuid4(),
             app_id=payment.app_id,
             payment_id=payment.id,
             event_id=event_id,
             event_type=event_type,
-            notify_url=payment.notify_url,
+            notify_url=notify_url,
             payload=payload,
             status=DeliveryStatus.pending,
             attempt_count=0,
@@ -195,15 +232,9 @@ class CallbackService:
         )
 
         self.session.add(delivery)
-
-        try:
-            await self.session.flush()
-            logger.info(
-                "webhook_delivery_created",
-                delivery_id=str(delivery.id),
-                event_id=event_id,
-            )
-        except IntegrityError:
-            # 幂等：同一 event_id 已存在
-            await self.session.rollback()
-            logger.info("webhook_delivery_already_exists", event_id=event_id)
+        await self.session.flush()
+        logger.info(
+            "webhook_delivery_created",
+            delivery_id=str(delivery.id),
+            event_id=event_id,
+        )
