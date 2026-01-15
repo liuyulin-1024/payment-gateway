@@ -286,71 +286,72 @@ class StripeAdapter(ProviderAdapter):
         provider_txn_id: str | None = None,
     ) -> dict:
         """
-        取消 Stripe PaymentIntent
+        取消 Stripe Checkout Session（expire）
 
-        注意：只能取消状态为 requires_payment_method, requires_capture,
-        requires_confirmation, requires_action, processing 的 PaymentIntent
+        注意：只能取消未完成的 Checkout Session
 
         Args:
-            merchant_order_no: 商户订单号（用于从 metadata 查找）
-            provider_txn_id: Stripe PaymentIntent ID，如果提供则直接使用
+            merchant_order_no: 商户订单号（用于日志或辅助定位）
+            provider_txn_id: Stripe Checkout Session ID（优先）
 
         Returns:
             包含取消结果的字典：
             {
                 "success": True/False,
-                "payment_intent_id": "pi_xxx",
-                "status": "canceled",
-                "cancellation_reason": "requested_by_customer"
+                "session_id": "cs_xxx",
+                "status": "expired"
             }
 
-        参考：https://docs.stripe.com/api/payment_intents/cancel
+        参考：https://docs.stripe.com/api/checkout/sessions/expire
         """
         try:
-            payment_intent_id = provider_txn_id
+            session_id = provider_txn_id
 
-            # 如果没有提供 provider_txn_id，需要通过 merchant_order_no 查找
-            if not payment_intent_id:
-                # Stripe 不支持直接通过 metadata 查询，这里需要从数据库查找
-                # 或者要求调用方必须提供 provider_txn_id
-                raise ValueError("Stripe cancel_payment 需要提供 provider_txn_id (PaymentIntent ID)")
+            # 如果没有提供 session_id，尝试基于 PaymentIntent ID 查找 Session
+            if not session_id and provider_txn_id:
+                sessions = stripe.checkout.Session.list(
+                    payment_intent=provider_txn_id, limit=1
+                )
+                if sessions.data:
+                    session_id = sessions.data[0].id
 
-            logger.info(f"开始取消 PaymentIntent - ID: {payment_intent_id}, 订单号: {merchant_order_no}")
-
-            # 调用 Stripe API 取消 PaymentIntent
-            payment_intent = stripe.PaymentIntent.cancel(
-                payment_intent_id, cancellation_reason="requested_by_customer"
-            )
+            if not session_id:
+                raise ValueError(
+                    "Stripe cancel_payment 需要提供 Checkout Session ID，或可通过 PaymentIntent ID 反查"
+                )
 
             logger.info(
-                f"PaymentIntent 取消成功 - ID: {payment_intent.id}, "
-                f"状态: {payment_intent.status}, "
-                f"原因: {payment_intent.cancellation_reason}"
+                f"开始取消 Checkout Session - ID: {session_id}, 订单号: {merchant_order_no}"
+            )
+
+            # 调用 Stripe API 过期 Checkout Session
+            session = stripe.checkout.Session.expire(session_id)
+
+            logger.info(
+                f"Checkout Session 取消成功 - ID: {session.id}, "
+                f"状态: {session.status}"
             )
 
             return {
                 "success": True,
-                "payment_intent_id": payment_intent.id,
-                "status": payment_intent.status,  # 应该是 'canceled'
-                "cancellation_reason": payment_intent.cancellation_reason,
-                "amount": payment_intent.amount,
-                "currency": payment_intent.currency,
+                "session_id": session.id,
+                "status": session.status,  # 应该是 'expired'
             }
 
         except stripe.error.InvalidRequestError as e:
-            # PaymentIntent 已经完成或无法取消
+            # Session 已完成或无法取消
             logger.warning(
-                f"PaymentIntent 无法取消 - ID: {provider_txn_id}, "
+                f"Checkout Session 无法取消 - ID: {provider_txn_id}, "
                 f"订单号: {merchant_order_no}, 错误: {str(e)}"
             )
             traceback.print_exc()
             return {
                 "success": False,
                 "error": str(e),
-                "message": "PaymentIntent 无法取消（可能已完成或状态不允许）",
+                "message": "Checkout Session 无法取消（可能已完成或状态不允许）",
             }
         except stripe.error.StripeError as e:
-            logger.error(f"取消 PaymentIntent 失败 - ID: {provider_txn_id}, 错误: {str(e)}")
+            logger.error(f"取消 Checkout Session 失败 - ID: {provider_txn_id}, 错误: {str(e)}")
             traceback.print_exc()
             raise ValueError(f"Stripe 取消支付失败: {str(e)}")
 

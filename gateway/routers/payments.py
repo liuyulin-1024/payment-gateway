@@ -12,14 +12,18 @@ from gateway.core.models import App
 from gateway.db import get_session
 from gateway.providers import get_adapter
 from gateway.core.settings import get_settings
+from gateway.core.constants import PaymentStatus
 from gateway.core.auth import get_app_from_api_key
 from gateway.services.payments import PaymentService
+from gateway.core.exceptions import PaymentProviderException
+from gateway.core.responses import success_response, bad_request_response, validation_error_response
 from gateway.core.schemas import (
     CreatePaymentRequest,
     CreatePaymentResponse,
+    CancelPaymentRequest,
+    CancelPaymentResponse,
     PaymentResponse,
 )
-from gateway.core.responses import success_response
 
 
 logger = structlog.get_logger(__name__)
@@ -115,6 +119,78 @@ async def create_payment(
             payload={"message": "Payment already exists"},
         )
         return success_response(data=response_data.model_dump(mode='json'), msg="支付已存在（幂等返回）")
+
+
+@router.post("/payments/cancel")
+async def cancel_payment(
+    req: CancelPaymentRequest,
+    app: App = Depends(get_app_from_api_key),
+    session: AsyncSession = Depends(get_session),
+    api_key: str = Security(api_key_header),
+):
+    """
+    取消支付（关闭订单）
+
+    - 参数：merchant_order_no, payment_id
+    - 鉴权：需要在请求头中提供 X-API-Key
+    """
+    log = logger.bind(
+        app_id=str(app.id),
+        payment_id=str(req.payment_id),
+        merchant_order_no=req.merchant_order_no,
+    )
+    log.info("收到取消支付请求")
+
+    payment_service = PaymentService(session)
+    payment = await payment_service.get_payment_by_id(app, req.payment_id)
+
+    if payment.merchant_order_no != req.merchant_order_no:
+        return validation_error_response('参数不匹配，请检查 merchant_order_no、payment_id')
+
+    if payment.status == PaymentStatus.canceled:
+        response_data = CancelPaymentResponse(
+            payment_id=payment.id,
+            merchant_order_no=payment.merchant_order_no,
+            status=payment.status,
+            provider_result=None,
+        )
+        return success_response(data=response_data.model_dump(mode='json'), msg="订单已取消")
+
+    if payment.status in (PaymentStatus.succeeded, PaymentStatus.failed):
+        return bad_request_response('当前支付状态不可取消')
+
+    provider_adapter = get_adapter(payment.provider)
+
+    try:
+        provider_result = await provider_adapter.cancel_payment(
+            merchant_order_no=payment.merchant_order_no,
+            provider_txn_id=payment.provider_txn_id,
+        )
+    except Exception as exc:
+        log.error("支付渠道取消失败", error=str(exc))
+        raise PaymentProviderException(
+            message="支付渠道取消失败",
+            code=5021,
+            details={"error": str(exc), "payment_id": str(payment.id)},
+        )
+
+    if isinstance(provider_result, dict) and provider_result.get("success") is False:
+        raise PaymentProviderException(
+            message="支付渠道取消失败",
+            code=5022,
+            details=provider_result,
+        )
+
+    await payment_service.update_payment_status(payment, PaymentStatus.canceled)
+    await session.commit()
+
+    response_data = CancelPaymentResponse(
+        payment_id=payment.id,
+        merchant_order_no=payment.merchant_order_no,
+        status=payment.status,
+        provider_result=provider_result,
+    )
+    return success_response(data=response_data.model_dump(mode='json'), msg="取消成功")
 
 
 @router.get("/payments/{payment_id}")

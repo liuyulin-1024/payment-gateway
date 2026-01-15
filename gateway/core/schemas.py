@@ -97,6 +97,29 @@ class PaymentResponse(BaseModel):
         from_attributes = True  # Pydantic v2: 允许从 ORM 模型创建
 
 
+# ===== 取消支付 =====
+
+
+class CancelPaymentRequest(BaseModel):
+    """取消支付请求"""
+
+    merchant_order_no: str = Field(
+        ..., min_length=1, max_length=64, description="商户订单号"
+    )
+    payment_id: UUID = Field(..., description="支付 ID")
+
+
+class CancelPaymentResponse(BaseModel):
+    """取消支付响应"""
+
+    payment_id: UUID = Field(..., description="支付 ID")
+    merchant_order_no: str = Field(..., description="商户订单号")
+    status: PaymentStatus = Field(..., description="支付状态")
+    provider_result: dict[str, Any] | None = Field(
+        None, description="支付渠道返回结果"
+    )
+
+
 # ===== 渠道回调（内部处理，无需公开 schema） =====
 
 
