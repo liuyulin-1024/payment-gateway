@@ -108,7 +108,30 @@ class CallbackService:
         # 关联 callback -> payment（便于追踪）
         callback.payment_id = refund.payment_id
 
+        # 先加锁，再做后续判断，避免并发窗口
         await self.session.refresh(refund, with_for_update=True)
+
+        # 确保 payment 与退款记录一致
+        if payment.id != refund.payment_id:
+            log.warning(
+                "退款回调关联的Payment与退款记录不一致，使用退款记录中的Payment",
+                original_payment_id=str(payment.id),
+                refund_payment_id=str(refund.payment_id),
+            )
+            stmt = select(Payment).where(Payment.id == refund.payment_id)
+            result = await self.session.execute(stmt)
+            payment = result.scalar_one_or_none()
+            if payment:
+                await self.session.refresh(payment, with_for_update=True)
+            if not payment:
+                log.error(
+                    "退款记录关联的Payment不存在",
+                    refund_id=str(refund.id),
+                    refund_payment_id=str(refund.payment_id),
+                )
+                callback.status = CallbackStatus.failed
+                await self.session.commit()
+                return
 
         outcome_map = {
             "refund_succeeded": RefundStatus.succeeded,
@@ -118,17 +141,40 @@ class CallbackService:
         }
         new_status = outcome_map.get(event.outcome)
 
-        if new_status and new_status != refund.status:
+        refund_terminal = {RefundStatus.succeeded, RefundStatus.failed, RefundStatus.canceled}
+
+        if not new_status:
+            log.warning(
+                "退款回调outcome无法映射到已知状态",
+                refund_id=str(refund.id),
+                outcome=event.outcome,
+            )
+            callback.status = CallbackStatus.failed
+            await self.session.commit()
+            return
+        elif refund.status in refund_terminal:
+            log.warning(
+                "退款已处于终态，忽略状态变更",
+                refund_id=str(refund.id),
+                current_status=refund.status.value,
+                incoming_status=new_status.value,
+            )
+        elif new_status != refund.status:
             refund.status = new_status
             if new_status == RefundStatus.succeeded and not refund.refunded_at:
                 refund.refunded_at = datetime.now(UTC)
 
+            if new_status in refund_terminal:
+                await self._create_refund_webhook_delivery(payment, refund, new_status)
+        else:
+            log.debug(
+                "退款回调状态未变更，跳过",
+                refund_id=str(refund.id),
+                status=refund.status.value,
+            )
+
         if not refund.provider_refund_id:
             refund.provider_refund_id = provider_refund_id
-
-        # 生成 WebhookDelivery
-        if new_status:
-            await self._create_refund_webhook_delivery(payment, refund, new_status)
 
         callback.status = CallbackStatus.processed
         callback.processed_at = datetime.now(UTC)
@@ -146,7 +192,25 @@ class CallbackService:
         old_status = payment.status
         new_status = self._map_outcome_to_status(event.outcome)
 
-        if new_status and new_status != old_status:
+        payment_terminal = {PaymentStatus.succeeded, PaymentStatus.failed, PaymentStatus.canceled}
+
+        if not new_status:
+            log.warning(
+                "支付回调outcome无法映射到已知状态",
+                payment_id=payment_id,
+                outcome=event.outcome,
+            )
+            callback.status = CallbackStatus.failed
+            await self.session.commit()
+            return
+        elif old_status in payment_terminal:
+            log.warning(
+                "支付已处于终态，忽略状态变更",
+                payment_id=payment_id,
+                current_status=old_status.value,
+                incoming_status=new_status.value,
+            )
+        elif new_status != old_status:
             payment.status = new_status
 
             if event.provider_txn_id and not payment.provider_txn_id:
@@ -162,13 +226,14 @@ class CallbackService:
                 new_status=new_status.value,
             )
 
-        # 4. 生成 WebhookDelivery（如果状态变更为终态）
-        if new_status in [
-            PaymentStatus.succeeded,
-            PaymentStatus.failed,
-            PaymentStatus.canceled,
-        ]:
-            await self._create_payment_webhook_delivery(payment, new_status)
+            if new_status in payment_terminal:
+                await self._create_payment_webhook_delivery(payment, new_status)
+        else:
+            log.debug(
+                "支付回调状态未变更，跳过",
+                payment_id=payment_id,
+                status=old_status.value,
+            )
 
         # 标记 callback 已处理
         callback.status = CallbackStatus.processed
@@ -283,6 +348,14 @@ class CallbackService:
         existing = result.scalar_one_or_none()
 
         if existing:
+            if existing.status == DeliveryStatus.succeeded:
+                logger.debug(
+                    "Webhook已成功投递，跳过重入队",
+                    delivery_id=str(existing.id),
+                    event_id=event_id,
+                )
+                return
+
             existing.notify_url = notify_url
             existing.payload = payload
             existing.status = DeliveryStatus.pending
