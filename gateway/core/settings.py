@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     )
 
     # 数据库配置
+    # 优先使用 DATABASE_URL 连接字符串；未设置时回退到独立字段拼接
+    database_url: str = ""
     db_host: str = "localhost"
     db_port: int = 5432
     db_user: str = "gateway"

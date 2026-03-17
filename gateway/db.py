@@ -22,7 +22,17 @@ async_session_factory: async_sessionmaker[AsyncSession] | None = None
 
 
 def get_database_url() -> str:
-    """构造异步数据库连接 URL"""
+    """
+    获取异步数据库连接 URL。
+    优先使用 DATABASE_URL 环境变量（适用于远程数据库），
+    未设置时回退到独立字段拼接。
+    """
+    if settings.database_url:
+        url = settings.database_url
+        if url.startswith("postgresql://"):
+            url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return url
+
     return (
         f"postgresql+asyncpg://{settings.db_user}:{settings.db_password}"
         f"@{settings.db_host}:{settings.db_port}/{settings.db_name}"
