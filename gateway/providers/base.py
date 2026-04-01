@@ -15,7 +15,7 @@ from gateway.core.schemas import PaymentTypeEnum, CallbackEvent
 class PaymentFlowType(str, Enum):
     """支付流程类型"""
 
-    HOSTED = "hosted"  # 托管支付（跳转到支付渠道页面）- Stripe Session, Alipay Form, WeChat QR
+    HOSTED = "hosted"  # 托管支付（跳转到支付渠道页面）- Stripe Checkout Session
 
 
 class ProviderPaymentResult(BaseModel):
@@ -64,8 +64,6 @@ class ProviderAdapter(ABC):
 
         这是主要的支付创建方法，适用于：
         - Stripe Checkout Session（托管页面）
-        - Alipay 电脑网站支付（Form 表单）
-        - WeChat Native 支付（二维码）
 
         参数：
             currency: 货币代码（如 USD, CNY）

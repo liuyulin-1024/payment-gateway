@@ -3,8 +3,6 @@ import enum
 
 class Provider(str, enum.Enum):
     stripe = "stripe"
-    alipay = "alipay"
-    wechatpay = "wechatpay"
 
 
 class Currency(str, enum.Enum):

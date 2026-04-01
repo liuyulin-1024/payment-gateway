@@ -46,7 +46,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 app = FastAPI(
     title="Payment Gateway",
-    description="统一支付网关服务（Stripe/微信/支付宝）",
+    description="统一支付网关服务（Stripe）",
     version="1.0.0",
     lifespan=lifespan,
     swagger_ui_parameters={

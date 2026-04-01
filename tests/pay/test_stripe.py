@@ -30,22 +30,6 @@ product_desc = "test desc"
 
 
 async def test_session():
-    # print("=" * 80)
-    # print("Test 1: Manual payment methods (alipay + card)")
-    # print("=" * 80)
-    # result1 = await adapter.create_checkout_session(
-    #     'CNY', 1000, 1, '测试商品', '商品描述',
-    #     customer_email, 'test', merchant_order_no, False
-    # )
-    #
-    # print("\n" + "=" * 80)
-    # print("SUMMARY")
-    # print("=" * 80)
-    # if result1:
-    #     print(f"\nManual methods URL:")
-    #     print(f"{result1.url}\n")
-    #     print(f"Available methods: {result1.payment_method_types}")
-
     print("\n" + "=" * 80)
     print("测试2：自动支付方式（由 Stripe 选择）")
     print("=" * 80)
@@ -71,7 +55,6 @@ async def test_session():
 
 
 async def create_checkout_session():
-    use_automatic_methods, include_wechat_pay = True, True
     session_data = {
         "mode": "payment",
         "line_items": [
@@ -92,7 +75,6 @@ async def create_checkout_session():
             "customer_name": customer_name,
             "merchant_order_no": merchant_order_no,
         },
-        # 将 metadata 同时传递到 PaymentIntent，确保在 payment_intent.* 事件中也能获取到
         "payment_intent_data": {
             "metadata": {
                 "customer_name": customer_name,
@@ -101,26 +83,8 @@ async def create_checkout_session():
         },
         "success_url": "https://www.baidu.com?session_id={CHECKOUT_SESSION_ID}",
         "cancel_url": "https://google.com",
+        "payment_method_types": ["card"],
     }
-
-    # 方式1：自动支付方式
-    if use_automatic_methods:
-        session_data["automatic_payment_methods"] = {"enabled": True}
-    else:
-        # 方式2：手动指定支付方式
-        payment_methods = ["alipay", "card"]
-        if include_wechat_pay:
-            payment_methods.append("wechat_pay")
-
-        session_data["payment_method_types"] = payment_methods
-        print(f"使用手动指定支付方式: {', '.join(payment_methods)}")
-
-    # 微信支付需要额外配置 payment_method_options
-    if include_wechat_pay:
-        session_data["payment_method_options"] = {
-            "wechat_pay": {"client": "web"}  # 'web' 用于网页端，'mobile' 用于移动端
-        }
-        print("微信支付客户端类型: web")
 
     try:
         print(

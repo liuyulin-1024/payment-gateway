@@ -7,18 +7,11 @@ from gateway.core.settings import get_settings
 from gateway.core.exceptions import ProviderNotAllowedException
 from .base import ProviderAdapter
 from .stripe import StripeAdapter, get_stripe_adapter
-from .wechatpay import WeChatPayAdapter, get_wechatpay_adapter
-from .alipay import AlipayAdapter, get_alipay_adapter
 
-# 导出类和获取函数
 __all__ = [
     "ProviderAdapter",
     "StripeAdapter",
-    "WeChatPayAdapter",
-    "AlipayAdapter",
     "get_stripe_adapter",
-    "get_wechatpay_adapter",
-    "get_alipay_adapter",
     "get_adapter",
     "is_provider_allowed",
 ]
@@ -43,9 +36,5 @@ def get_adapter(provider: Provider) -> ProviderAdapter:
 
     if provider == Provider.stripe:
         return get_stripe_adapter()
-    elif provider == Provider.wechatpay:
-        return get_wechatpay_adapter()
-    elif provider == Provider.alipay:
-        return get_alipay_adapter()
     else:
         raise ValueError(f"Unsupported provider: {provider}")

@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     db_max_overflow: int = 10
     need_reset_database: bool = False  # 是否强制重置数据库表
 
-    # 允许的支付渠道（逗号分隔，如 "stripe,alipay"），默认仅开放 stripe
+    # 允许的支付渠道（逗号分隔，如 "stripe"），默认仅开放 stripe
     allowed_providers: list[str] = Field(default=["stripe"])
 
     @field_validator("allowed_providers", mode="before")
@@ -51,16 +51,9 @@ class Settings(BaseSettings):
             )
         return v
 
-    # 支付配置（所有支付提供商配置均为可选）
-    ## stripe
+    # Stripe 配置
     stripe_secret_key: str
     stripe_webhook_secret: str
-
-    ## alipay
-    alipay_app_id: str = ""
-    alipay_private_key: str = ""  # 应用私钥内容
-    alipay_public_key: str = ""  # 支付宝公钥内容
-    alipay_sandbox: bool = False
 
     # 应用配置
     debug: bool = False  # 调试模式（开发环境设为 True）

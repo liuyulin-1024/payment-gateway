@@ -419,7 +419,7 @@ class StripeAdapter(ProviderAdapter):
 
         支持的事件类型：
         - checkout.session.completed: Checkout Session 完成
-        - checkout.session.async_payment_succeeded: 异步支付成功（Alipay等）
+        - checkout.session.async_payment_succeeded: 异步支付成功
         - checkout.session.async_payment_failed: 异步支付失败
         - checkout.session.expired: Session 过期（网关统一视为 canceled）
         - refund.updated: 退款状态更新
@@ -502,7 +502,7 @@ class StripeAdapter(ProviderAdapter):
             if payment_status == "paid":
                 outcome = "succeeded"
             elif payment_status == "unpaid":
-                # 异步支付方式（如 Alipay）常见：Session completed 但尚未支付完成
+                # 异步支付方式常见：Session completed 但尚未支付完成
                 outcome = "pending"
             else:
                 outcome = "unknown"
