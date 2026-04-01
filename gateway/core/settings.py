@@ -5,8 +5,12 @@
 from __future__ import annotations
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from gateway.core.constants import Provider
+
+_VALID_PROVIDERS = {p.value for p in Provider}
 
 
 class Settings(BaseSettings):
@@ -31,6 +35,21 @@ class Settings(BaseSettings):
     db_pool_size: int = 5
     db_max_overflow: int = 10
     need_reset_database: bool = False  # 是否强制重置数据库表
+
+    # 允许的支付渠道（逗号分隔，如 "stripe,alipay"），默认仅开放 stripe
+    allowed_providers: list[str] = Field(default=["stripe"])
+
+    @field_validator("allowed_providers", mode="before")
+    @classmethod
+    def parse_allowed_providers(cls, v):
+        if isinstance(v, str):
+            v = [p.strip() for p in v.split(",") if p.strip()]
+        unknown = set(v) - _VALID_PROVIDERS
+        if unknown:
+            raise ValueError(
+                f"不支持的支付渠道: {unknown}，可选值: {_VALID_PROVIDERS}"
+            )
+        return v
 
     # 支付配置（所有支付提供商配置均为可选）
     ## stripe

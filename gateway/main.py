@@ -35,6 +35,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     configure_logging()
     await reset_tables()
     await init_db()
+    logger.info(
+        "已启用的支付渠道",
+        allowed_providers=settings.allowed_providers,
+    )
     yield
     # 关闭
     await close_db()

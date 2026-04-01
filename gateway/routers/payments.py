@@ -10,13 +10,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.models import App
 from gateway.db import get_session
-from gateway.providers import get_adapter
 from gateway.core.settings import get_settings
 from gateway.core.constants import PaymentStatus
 from gateway.core.auth import get_app_from_api_key
 from gateway.services.payments import PaymentService
 from gateway.services.refunds import RefundService
 from gateway.core.exceptions import PaymentProviderException
+from gateway.providers import get_adapter, is_provider_allowed
+from gateway.core.exceptions import ProviderNotAllowedException
 from gateway.core.responses import (
     success_response,
     bad_request_response,
@@ -66,6 +67,9 @@ async def create_payment(
     )
 
     log.info("收到创建支付请求")
+
+    if not is_provider_allowed(req.provider):
+        raise ProviderNotAllowedException(provider=req.provider.value)
 
     payment_service = PaymentService(session)
 
