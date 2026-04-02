@@ -16,6 +16,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -252,7 +253,11 @@ class WebhookDelivery(Base):
             "app_id", "event_id", name="uq_webhook_deliveries_app_event_id"
         ),
         Index(
-            "ix_webhook_deliveries_status_next_attempt_at", "status", "next_attempt_at"
+            "ix_webhook_deliveries_worker_poll",
+            "status",
+            "next_attempt_at",
+            "created_at",
+            postgresql_where=text("status IN ('pending', 'failed', 'processing')"),
         ),
         Index("ix_webhook_deliveries_app_created_at", "app_id", "created_at"),
         Index("ix_webhook_deliveries_payment_created_at", "payment_id", "created_at"),

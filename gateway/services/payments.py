@@ -2,11 +2,13 @@
 支付服务层（创建/查询/状态机推进）
 """
 
+import hashlib
+import struct
 import uuid
 from datetime import datetime, UTC
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
@@ -47,7 +49,13 @@ class PaymentService:
             idempotency_key=idempotency_key,
         )
 
-        # 尝试查找已有订单
+        # 事务级 advisory lock 防止同一订单号并发创建
+        raw = f"{app.id}:{req.merchant_order_no}".encode()
+        lock_key = struct.unpack(">q", hashlib.sha256(raw).digest()[:8])[0]
+        await self.session.execute(
+            text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key}
+        )
+
         stmt = select(Payment).where(
             Payment.app_id == app.id,
             Payment.merchant_order_no == req.merchant_order_no,

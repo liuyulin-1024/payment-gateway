@@ -2,6 +2,7 @@
 FastAPI 主应用入口
 """
 
+import asyncio
 import traceback
 import structlog
 from typing import AsyncGenerator
@@ -10,6 +11,8 @@ from contextlib import asynccontextmanager
 from pydantic import ValidationError
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
 
 from gateway.db import close_db, init_db
 from gateway.core.settings import get_settings
@@ -21,6 +24,7 @@ from gateway.core.responses import (
     bad_request_response,
     validation_error_response,
     internal_server_response,
+    service_unavailable_response,
     success_response,
 )
 
@@ -182,7 +186,29 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """健康检查"""
+    """健康检查（含数据库连通性验证）"""
+    from gateway.db import engine as db_engine
+
+    if db_engine is None:
+        return service_unavailable_response(
+            msg="服务降级", data={"status": "degraded", "db": "not_initialized"}
+        )
+
+    try:
+        async with db_engine.connect() as conn:
+            await asyncio.wait_for(
+                conn.execute(text("SELECT 1")),
+                timeout=3.0,
+            )
+    except asyncio.TimeoutError:
+        return service_unavailable_response(
+            msg="服务降级", data={"status": "degraded", "db": "timeout"}
+        )
+    except Exception:
+        return service_unavailable_response(
+            msg="服务降级", data={"status": "degraded", "db": "error"}
+        )
+
     return success_response(data={"status": "ok"})
 
 

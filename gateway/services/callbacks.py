@@ -2,14 +2,13 @@
 Callback 处理服务（入站回调 -> 落库 -> 推进 Payment -> 生成 WebhookDelivery）
 """
 
-import traceback
 import uuid
 from datetime import datetime, UTC
 
 import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from gateway.core.constants import (
     CallbackStatus,
@@ -243,38 +242,43 @@ class CallbackService:
         log.info("支付回调处理完成", payment_id=payment_id)
 
     async def _upsert_callback(self, event: CallbackEvent) -> Callback:
-        """写入 callback（幂等）"""
-        # 尝试插入
-        callback = Callback(
-            id=uuid.uuid4(),
-            provider=event.raw_payload.get("provider"),
-            provider_event_id=event.provider_event_id,
-            provider_txn_id=event.provider_txn_id,
-            payment_id=None,
-            payload=event.raw_payload,
-            status=CallbackStatus.processing,
+        """写入 callback（幂等，使用 ON CONFLICT 避免 rollback 开销）"""
+        callback_id = uuid.uuid4()
+        provider_val = event.raw_payload.get("provider")
+
+        stmt = (
+            pg_insert(Callback)
+            .values(
+                id=callback_id,
+                provider=provider_val,
+                provider_event_id=event.provider_event_id,
+                provider_txn_id=event.provider_txn_id,
+                payment_id=None,
+                payload=event.raw_payload,
+                status=CallbackStatus.processing,
+            )
+            .on_conflict_do_nothing(
+                constraint="uq_callbacks_provider_provider_event_id"
+            )
         )
 
-        self.session.add(callback)
+        result = await self.session.execute(stmt)
 
-        try:
+        if result.rowcount > 0:
             await self.session.flush()
-            return callback
-        except IntegrityError:
-            # 已存在（幂等），回滚后查询
-            logger.error(f"写入回调事件失败：{traceback.format_exc()}")
-            await self.session.rollback()
-            stmt = select(Callback).where(
-                Callback.provider == callback.provider,
-                Callback.provider_event_id == callback.provider_event_id,
+            fetch = select(Callback).where(Callback.id == callback_id)
+            row = await self.session.execute(fetch)
+            return row.scalar_one()
+        else:
+            fetch = select(Callback).where(
+                Callback.provider == provider_val,
+                Callback.provider_event_id == event.provider_event_id,
             )
-            result = await self.session.execute(stmt)
-            existing = result.scalar_one()
-            return existing
+            row = await self.session.execute(fetch)
+            return row.scalar_one()
 
     async def _find_payment(self, event: CallbackEvent) -> Payment | None:
-        """定位 Payment（通过 merchant_order_no 或 provider_txn_id）"""
-        # 优先用 merchant_order_no
+        """定位 Payment（优先 merchant_order_no，回退 provider_txn_id）"""
         if event.merchant_order_no:
             stmt = select(Payment).where(
                 Payment.merchant_order_no == event.merchant_order_no
@@ -284,15 +288,12 @@ class CallbackService:
             if payment:
                 return payment
 
-        # 回退用 provider_txn_id
         if event.provider_txn_id:
             stmt = select(Payment).where(
                 Payment.provider_txn_id == event.provider_txn_id
             )
             result = await self.session.execute(stmt)
-            payment = result.scalar_one_or_none()
-            if payment:
-                return payment
+            return result.scalar_one_or_none()
 
         return None
 

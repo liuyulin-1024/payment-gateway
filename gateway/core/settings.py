@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     db_echo: bool = False
     db_pool_size: int = 5
     db_max_overflow: int = 10
+    db_pool_recycle: int = 1800  # 连接最大存活秒数，防止被中间件/防火墙断开
     need_reset_database: bool = False  # 是否强制重置数据库表
 
     # 允许的支付渠道（逗号分隔，如 "stripe"），默认仅开放 stripe
@@ -64,6 +65,7 @@ class Settings(BaseSettings):
     worker_poll_interval: int = 5  # 轮询间隔（秒）
     worker_batch_size: int = 10  # 每批处理任务数
     worker_max_retries: int = 10  # 最大重试次数
+    worker_concurrency: int = 5  # 单批内并发投递数
 
 
 @lru_cache

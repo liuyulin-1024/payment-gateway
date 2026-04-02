@@ -163,7 +163,7 @@ class StripeAdapter(ProviderAdapter):
         logger.info(f"Stripe 下单参数：{session_data}")
 
         try:
-            session = stripe.checkout.Session.create(**session_data)
+            session = await stripe.checkout.Session.create_async(**session_data)
 
             logger.info(
                 f"Stripe Checkout Session 创建成功 - ID: {session.id}, "
@@ -181,18 +181,18 @@ class StripeAdapter(ProviderAdapter):
             )
 
         except stripe.error.InvalidRequestError as e:
-            # 处理参数错误（如不支持的支付方式）
             error_msg = str(e)
             logger.error(f"Stripe 请求参数错误：{error_msg}")
 
-            # 如果是支付方式相关错误，尝试回退到只使用 card
             if "payment_method" in error_msg.lower() and session_data.get(
                 "payment_method_types"
             ) != ["card"]:
                 logger.warning("回退为仅使用 card 支付方式")
                 session_data["payment_method_types"] = ["card"]
                 try:
-                    session = stripe.checkout.Session.create(**session_data)
+                    session = await stripe.checkout.Session.create_async(
+                        **session_data
+                    )
                     logger.info(f"回退方式创建成功 - ID: {session.id}")
                     return ProviderPaymentResult(
                         type=PaymentTypeEnum.url,
@@ -239,10 +239,9 @@ class StripeAdapter(ProviderAdapter):
         参考：https://docs.stripe.com/api/refunds/create
         """
         try:
-            # 兼容 Checkout Session ID（cs_），先解析为 PaymentIntent
             payment_intent_id = txn_id
             if txn_id.startswith("cs_"):
-                session = stripe.checkout.Session.retrieve(txn_id)
+                session = await stripe.checkout.Session.retrieve_async(txn_id)
                 payment_intent_id = session.payment_intent
                 if not payment_intent_id:
                     raise ValueError(
@@ -273,8 +272,7 @@ class StripeAdapter(ProviderAdapter):
                     stripe_reason = reason
                 refund_params["reason"] = stripe_reason
 
-            # 调用 Stripe API 创建退款
-            refund = stripe.Refund.create(**refund_params)
+            refund = await stripe.Refund.create_async(**refund_params)
 
             logger.info(
                 f"退款创建成功 - Refund ID: {refund.id}, "
@@ -327,8 +325,9 @@ class StripeAdapter(ProviderAdapter):
 
             # 如果没有提供 session_id，尝试基于 PaymentIntent ID 查找 Session
             if not session_id and provider_txn_id:
-                sessions = stripe.checkout.Session.list(
-                    payment_intent=provider_txn_id, limit=1
+                sessions = await stripe.checkout.Session.list_async(
+                    payment_intent=provider_txn_id,
+                    limit=1,
                 )
                 if sessions.data:
                     session_id = sessions.data[0].id
@@ -342,8 +341,7 @@ class StripeAdapter(ProviderAdapter):
                 f"开始取消 Checkout Session - ID: {session_id}, 订单号: {merchant_order_no}"
             )
 
-            # 调用 Stripe API 过期 Checkout Session
-            session = stripe.checkout.Session.expire(session_id)
+            session = await stripe.checkout.Session.expire_async(session_id)
 
             logger.info(
                 f"Checkout Session 取消操作完成 - ID: {session.id}, "
@@ -386,7 +384,7 @@ class StripeAdapter(ProviderAdapter):
         参考：https://docs.stripe.com/api/refunds/retrieve
         """
         try:
-            refund = stripe.Refund.retrieve(refund_id)
+            refund = await stripe.Refund.retrieve_async(refund_id)
 
             logger.info(
                 f"退款查询成功 - Refund ID: {refund.id}, "
