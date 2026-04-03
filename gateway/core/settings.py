@@ -24,7 +24,6 @@ class Settings(BaseSettings):
     )
 
     # 数据库配置
-    # 优先使用 DATABASE_URL 连接字符串；未设置时回退到独立字段拼接
     database_url: str = ""
     db_host: str = "localhost"
     db_port: int = 5432
@@ -34,10 +33,10 @@ class Settings(BaseSettings):
     db_echo: bool = False
     db_pool_size: int = 5
     db_max_overflow: int = 10
-    db_pool_recycle: int = 1800  # 连接最大存活秒数，防止被中间件/防火墙断开
-    need_reset_database: bool = False  # 是否强制重置数据库表
+    db_pool_recycle: int = 1800
+    need_reset_database: bool = False
 
-    # 允许的支付渠道（逗号分隔，如 "stripe"），默认仅开放 stripe
+    # 允许的支付渠道
     allowed_providers: list[str] = Field(default=["stripe"])
 
     @field_validator("allowed_providers", mode="before")
@@ -57,15 +56,21 @@ class Settings(BaseSettings):
     stripe_webhook_secret: str
 
     # 应用配置
-    debug: bool = False  # 调试模式（开发环境设为 True）
+    debug: bool = False
     log_level: str = "INFO"
     payment_expire_minutes_default: int = Field(default=30, ge=1, le=24 * 60)
 
     # Worker 配置
-    worker_poll_interval: int = 5  # 轮询间隔（秒）
-    worker_batch_size: int = 10  # 每批处理任务数
-    worker_max_retries: int = 10  # 最大重试次数
-    worker_concurrency: int = 5  # 单批内并发投递数
+    worker_poll_interval: int = 5
+    worker_batch_size: int = 10
+    worker_max_retries: int = 10
+    worker_concurrency: int = 5
+
+    # 订阅配置
+    subscription_checkout_expire_minutes: int = Field(default=60, ge=30, le=1440)
+    subscription_single_active: bool = Field(default=True)
+    subscription_incomplete_cleanup_minutes: int = Field(default=120, ge=60, le=2880)
+    subscription_cleanup_interval: int = Field(default=300, ge=60)
 
 
 @lru_cache
