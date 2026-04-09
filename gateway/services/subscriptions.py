@@ -444,9 +444,9 @@ class SubscriptionService:
                 message="跨渠道变更不支持", code=4022
             )
 
-        if new_plan.tier == current_plan.tier:
+        if new_plan.tier == current_plan.tier and new_plan.interval == current_plan.interval:
             raise BadRequestException(
-                message="同等级计划不允许变更", code=4023
+                message="同等级同周期计划不允许变更", code=4023
             )
 
         if not new_plan.provider_price_id:
@@ -458,7 +458,11 @@ class SubscriptionService:
         if not isinstance(adapter, SubscriptionProviderMixin):
             raise BadRequestException(message="渠道不支持订阅操作", code=4007)
 
-        is_upgrade = new_plan.tier > current_plan.tier
+        _interval_rank = {"week": 0, "month": 1, "quarter": 2, "year": 3}
+        if new_plan.tier != current_plan.tier:
+            is_upgrade = new_plan.tier > current_plan.tier
+        else:
+            is_upgrade = _interval_rank.get(new_plan.interval, 1) > _interval_rank.get(current_plan.interval, 1)
 
         if is_upgrade:
             if subscription.status == SubscriptionStatus.paused.value:
