@@ -20,6 +20,8 @@ from gateway.core.schemas import (
     CancelSubscriptionRequest,
     ChangePlanRequest,
     ChangePlanResponse,
+    PreviewChangePlanRequest,
+    PreviewChangePlanResponse,
     PlanResponse,
 )
 from gateway.core.responses import success_response
@@ -227,10 +229,28 @@ async def change_plan(
                 else None
             ),
             pending_plan_change_at=result["pending_plan_change_at"],
+            current_period_end=result.get("current_period_end"),
             status=result.get("status", "active"),
         ).model_dump(mode="json")
     )
 
+
+
+@router.post(
+    "/subscriptions/{subscription_id}/preview-change",
+    summary="预览变更计划费用",
+)
+async def preview_change(
+    subscription_id: UUID,
+    req: PreviewChangePlanRequest,
+    app: App = Depends(get_app_from_api_key),
+    session: AsyncSession = Depends(get_session),
+):
+    svc = SubscriptionService(session)
+    result = await svc.preview_change(app.id, subscription_id, req.new_plan_id)
+    return success_response(
+        data=PreviewChangePlanResponse(**result).model_dump(mode="json")
+    )
 
 @router.post(
     "/subscriptions/{subscription_id}/cancel-pending-change",

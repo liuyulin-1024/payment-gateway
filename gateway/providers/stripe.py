@@ -536,6 +536,7 @@ class StripeAdapter(ProviderAdapter, SubscriptionProviderMixin):
         modify_params = {
             "items": [{"id": current_item_id, "price": new_price_id}],
             "proration_behavior": "always_invoice",
+            "billing_cycle_anchor": "now",
         }
         sub = await stripe.Subscription.modify_async(
             subscription_id, **modify_params
@@ -552,6 +553,40 @@ class StripeAdapter(ProviderAdapter, SubscriptionProviderMixin):
             ),
             cancel_at_period_end=sub.cancel_at_period_end,
         )
+
+    async def preview_plan_change(
+        self,
+        subscription_id: str,
+        *,
+        new_price_id: str,
+    ) -> dict:
+        """使用 Stripe Invoice.create_preview 预览变更费用，与实际扣费逻辑一致。"""
+        current_sub = await stripe.Subscription.retrieve_async(subscription_id)
+        if not current_sub["items"]["data"]:
+            raise ValueError(f"订阅 {subscription_id} 无 items，无法预览")
+        current_item_id = current_sub["items"]["data"][0].id
+
+        preview = await stripe.Invoice.create_preview_async(
+            subscription=subscription_id,
+            subscription_details={
+                "items": [{"id": current_item_id, "price": new_price_id}],
+                "proration_behavior": "always_invoice",
+                "billing_cycle_anchor": "now",
+            },
+        )
+
+        lines = []
+        for line in preview.lines.data:
+            lines.append({
+                "amount": line.amount,
+                "description": line.description or "",
+            })
+
+        return {
+            "currency": preview.currency,
+            "total": preview.total,
+            "lines": lines,
+        }
 
     async def schedule_subscription_downgrade(
         self,

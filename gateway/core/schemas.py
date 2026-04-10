@@ -347,4 +347,20 @@ class ChangePlanResponse(BaseModel):
     current_plan: PlanResponse
     pending_plan: PlanResponse | None
     pending_plan_change_at: datetime | None
+    current_period_end: datetime | None = None
     status: str
+
+
+class PreviewChangePlanRequest(BaseModel):
+    new_plan_id: UUID
+
+
+class PreviewChangePlanLineItem(BaseModel):
+    amount: int = Field(..., description="金额（最小货币单位，如分）")
+    description: str = Field(default="", description="行项目描述")
+
+
+class PreviewChangePlanResponse(BaseModel):
+    currency: str
+    total: int = Field(..., description="总金额（最小货币单位）")
+    lines: list[PreviewChangePlanLineItem] = Field(default_factory=list, description="发票行项目明细")

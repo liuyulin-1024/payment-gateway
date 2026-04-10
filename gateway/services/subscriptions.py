@@ -514,7 +514,7 @@ class SubscriptionService:
                 await self.session.execute(customer_stmt)
             ).scalar_one_or_none()
 
-            await adapter.change_subscription_plan(
+            upgrade_result = await adapter.change_subscription_plan(
                 subscription.provider_subscription_id,
                 new_price_id=new_plan.provider_price_id,
                 proration_mode=proration,
@@ -536,6 +536,11 @@ class SubscriptionService:
             subscription.pending_plan_change_at = None
             subscription.provider_schedule_id = None
 
+            # Update billing cycle from Stripe (reset by billing_cycle_anchor=now)
+            if upgrade_result.current_period_end:
+                subscription.current_period_start = datetime.now(UTC)
+                subscription.current_period_end = upgrade_result.current_period_end
+
             await self.session.flush()
             log.info("升级完成", new_plan_id=str(new_plan.id))
 
@@ -546,6 +551,7 @@ class SubscriptionService:
                 "pending_plan": None,
                 "pending_plan_change_at": None,
                 "status": subscription.status,
+                "current_period_end": subscription.current_period_end,
             }
 
         else:
@@ -587,6 +593,46 @@ class SubscriptionService:
                 "pending_plan_change_at": subscription.current_period_end,
                 "status": subscription.status,
             }
+
+    async def preview_change(
+        self,
+        app_id: uuid.UUID,
+        subscription_id: uuid.UUID,
+        new_plan_id: uuid.UUID,
+    ) -> dict:
+        """预览变更计划的费用，直接调用 Stripe Invoice.create_preview。"""
+        subscription = await self.get_subscription(app_id, subscription_id)
+
+        allowed_statuses = {
+            SubscriptionStatus.active.value,
+            SubscriptionStatus.trialing.value,
+        }
+        if subscription.status not in allowed_statuses:
+            raise BadRequestException(
+                message="当前状态不允许预览变更", code=4018
+            )
+
+        new_plan = await self._get_plan(app_id, new_plan_id)
+        if not new_plan.is_active:
+            raise BadRequestException(message="目标计划已停用", code=4021)
+        if not new_plan.provider_price_id:
+            raise BadRequestException(
+                message="目标计划尚未完成渠道同步", code=4005
+            )
+
+        if not subscription.provider_subscription_id:
+            raise BadRequestException(
+                message="订阅尚未激活，无法预览", code=4011
+            )
+
+        adapter = get_adapter(subscription.provider)
+        if not isinstance(adapter, SubscriptionProviderMixin):
+            raise BadRequestException(message="渠道不支持订阅操作", code=4007)
+
+        return await adapter.preview_plan_change(
+            subscription.provider_subscription_id,
+            new_price_id=new_plan.provider_price_id,
+        )
 
     async def cancel_pending_downgrade(
         self, app_id: uuid.UUID, subscription_id: uuid.UUID

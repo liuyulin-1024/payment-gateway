@@ -213,3 +213,12 @@ class SubscriptionProviderMixin(ABC):
     @abstractmethod
     async def release_subscription_schedule(self, schedule_id: str) -> None:
         """取消待生效的降级调度"""
+
+    @abstractmethod
+    async def preview_plan_change(
+        self,
+        subscription_id: str,
+        *,
+        new_price_id: str,
+    ) -> dict:
+        """预览变更计划时 Stripe 将产生的费用明细，返回 dict 包含 line items 和 total"""
