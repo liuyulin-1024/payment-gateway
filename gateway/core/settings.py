@@ -4,9 +4,10 @@
 
 from __future__ import annotations
 from functools import lru_cache
+from typing import Annotated
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from gateway.core.constants import Provider
 
@@ -36,8 +37,8 @@ class Settings(BaseSettings):
     db_pool_recycle: int = 1800
     need_reset_database: bool = False
 
-    # 允许的支付渠道
-    allowed_providers: list[str] = Field(default=["stripe"])
+    # 允许的支付渠道（接受逗号分隔字符串或 JSON 数组）
+    allowed_providers: Annotated[list[str], NoDecode] = Field(default=["stripe"])
 
     @field_validator("allowed_providers", mode="before")
     @classmethod
