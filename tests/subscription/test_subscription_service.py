@@ -134,6 +134,57 @@ class TestCreateSubscription:
         with pytest.raises(ConflictException, match="未完成的订阅"):
             await svc.create_subscription(test_app, req)
 
+    async def test_create_with_force_cleanup_cleans_incomplete(
+        self, session, test_app, basic_plan, incomplete_subscription, patch_deps
+    ):
+        """force_cleanup=True 时先过期未完成订阅，再创建新的 Checkout。"""
+        svc = SubscriptionService(session)
+        req = CreateSubscriptionRequest(
+            external_user_id="test_user_001",
+            plan_id=basic_plan.id,
+            email="new@example.com",
+            success_url="https://example.com/success",
+            cancel_url="https://example.com/cancel",
+            force_cleanup=True,
+        )
+
+        sub, checkout_url = await svc.create_subscription(test_app, req)
+
+        assert sub.status == SubscriptionStatus.incomplete.value
+        assert sub.plan_id == basic_plan.id
+        assert "cs_test_new_789" in checkout_url
+        patch_deps.cancel_payment.assert_called()
+
+        await session.refresh(incomplete_subscription)
+        assert (
+            incomplete_subscription.status
+            == SubscriptionStatus.incomplete_expired.value
+        )
+
+    async def test_create_with_force_cleanup_cleans_active(
+        self, session, test_app, basic_plan, active_subscription, patch_deps
+    ):
+        """force_cleanup=True 时先立即取消活跃订阅，再创建新的 Checkout。"""
+        svc = SubscriptionService(session)
+        req = CreateSubscriptionRequest(
+            external_user_id="test_user_001",
+            plan_id=basic_plan.id,
+            email="new@example.com",
+            success_url="https://example.com/success",
+            cancel_url="https://example.com/cancel",
+            force_cleanup=True,
+        )
+
+        sub, _ = await svc.create_subscription(test_app, req)
+
+        assert sub.status == SubscriptionStatus.incomplete.value
+        patch_deps.cancel_subscription.assert_called_with(
+            "sub_test_100", immediate=True
+        )
+
+        await session.refresh(active_subscription)
+        assert active_subscription.status == SubscriptionStatus.canceled.value
+
     async def test_create_duplicate_active_rejected(
         self, session, test_app, basic_plan, active_subscription, patch_deps
     ):

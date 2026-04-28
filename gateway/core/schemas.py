@@ -297,6 +297,7 @@ class CreateSubscriptionRequest(BaseModel):
     notify_url: str | None = Field(None, max_length=2048)
     trial_period_days: int | None = Field(None, ge=1, le=365)
     metadata: dict | None = None
+    force_cleanup: bool = False
 
 
 class CreateSubscriptionResponse(BaseModel):

@@ -2,6 +2,7 @@
 订阅核心服务（创建/取消/恢复/暂停/升降级）
 """
 
+import asyncio
 import hashlib
 import struct
 import uuid
@@ -42,18 +43,13 @@ class SubscriptionService:
         app: App,
         req: CreateSubscriptionRequest,
         adapter: SubscriptionProviderMixin,
+        provider,
     ) -> Customer:
         """查找/创建 Customer（独立事务，不受外层回滚影响）"""
-        plan_stmt = select(Plan).where(Plan.id == req.plan_id, Plan.app_id == app.id)
-        plan_result = await customer_session.execute(plan_stmt)
-        plan = plan_result.scalar_one_or_none()
-        if not plan:
-            raise BadRequestException(message="目标计划不存在", code=4003)
-
         stmt = select(Customer).where(
             Customer.app_id == app.id,
             Customer.external_user_id == req.external_user_id,
-            Customer.provider == plan.provider,
+            Customer.provider == provider,
         )
         result = await customer_session.execute(stmt)
         customer = result.scalar_one_or_none()
@@ -74,7 +70,7 @@ class SubscriptionService:
         customer = Customer(
             id=uuid.uuid4(),
             app_id=app.id,
-            provider=plan.provider,
+            provider=provider,
             external_user_id=req.external_user_id,
             provider_customer_id=provider_customer_id,
             email=req.email,
@@ -87,6 +83,142 @@ class SubscriptionService:
             provider_customer_id=provider_customer_id,
         )
         return customer
+
+    async def _stripe_cleanup_remote_for_force(self, sub: Subscription) -> None:
+        """仅调用 Stripe 侧清理（不写 DB）。供 force_cleanup 并发执行。"""
+        sid = str(sub.id)
+        log = logger.bind(subscription_id=sid)
+
+        if sub.status == SubscriptionStatus.incomplete.value:
+            if sub.provider_checkout_session_id:
+                adapter = get_adapter(sub.provider)
+                try:
+                    await adapter.cancel_payment(
+                        merchant_order_no=sid,
+                        provider_txn_id=sub.provider_checkout_session_id,
+                    )
+                    log.info("incomplete_checkout_session_expired")
+                except Exception as e:
+                    log.warning(
+                        "incomplete_checkout_expire_failed", error=str(e)
+                    )
+            return
+
+        allowed = {
+            SubscriptionStatus.active.value,
+            SubscriptionStatus.trialing.value,
+            SubscriptionStatus.past_due.value,
+            SubscriptionStatus.paused.value,
+        }
+        if sub.status not in allowed:
+            return
+
+        if not sub.provider_subscription_id:
+            log.warning("force_cleanup_skip_no_provider_subscription_id")
+            return
+
+        adapter = get_adapter(sub.provider)
+        if not isinstance(adapter, SubscriptionProviderMixin):
+            raise BadRequestException(message="渠道不支持订阅操作", code=4007)
+
+        if sub.provider_schedule_id:
+            try:
+                await adapter.release_subscription_schedule(
+                    sub.provider_schedule_id
+                )
+            except Exception as e:
+                log.warning(
+                    "释放降级 Schedule 失败，继续取消",
+                    error=str(e),
+                    schedule_id=sub.provider_schedule_id,
+                )
+
+        await adapter.cancel_subscription(
+            sub.provider_subscription_id, immediate=True
+        )
+
+    async def _force_cleanup_conflicting_subscriptions(
+        self, app: App, customer_id: uuid.UUID
+    ) -> None:
+        """
+        取消/过期该客服下所有会阻塞新订阅创建的记录（incomplete + 活跃类）。
+        Stripe 调用并发执行；ORM 更新在同一会话内顺序提交。
+        """
+        cleanup_statuses = [
+            SubscriptionStatus.incomplete.value,
+            SubscriptionStatus.active.value,
+            SubscriptionStatus.trialing.value,
+            SubscriptionStatus.past_due.value,
+            SubscriptionStatus.paused.value,
+        ]
+        stmt = (
+            select(Subscription)
+            .where(
+                Subscription.app_id == app.id,
+                Subscription.customer_id == customer_id,
+                Subscription.status.in_(cleanup_statuses),
+            )
+            .order_by(Subscription.created_at.asc())
+        )
+        result = await self.session.execute(stmt)
+        subs = list(result.scalars().all())
+        if not subs:
+            return
+
+        log = logger.bind(
+            app_id=str(app.id),
+            customer_id=str(customer_id),
+            count=len(subs),
+        )
+        log.info("force_cleanup_subscriptions_start")
+
+        # 主线程先触达列，避免并发协程中懒加载命中 async session
+        for s in subs:
+            _ = (
+                s.provider,
+                s.status,
+                s.provider_checkout_session_id,
+                s.provider_subscription_id,
+                s.provider_schedule_id,
+            )
+
+        outcomes = await asyncio.gather(
+            *[self._stripe_cleanup_remote_for_force(s) for s in subs],
+            return_exceptions=True,
+        )
+
+        allowed_active = {
+            SubscriptionStatus.active.value,
+            SubscriptionStatus.trialing.value,
+            SubscriptionStatus.past_due.value,
+            SubscriptionStatus.paused.value,
+        }
+        now = datetime.now(UTC)
+        for sub, outcome in zip(subs, outcomes):
+            if isinstance(outcome, Exception):
+                logger.error(
+                    "force_cleanup_stripe_failed",
+                    subscription_id=str(sub.id),
+                    error=str(outcome),
+                )
+                continue
+
+            if sub.status == SubscriptionStatus.incomplete.value:
+                sub.status = SubscriptionStatus.incomplete_expired.value
+                sub.canceled_at = now
+                sub.ended_at = now
+            elif sub.status in allowed_active:
+                if sub.provider_schedule_id:
+                    sub.pending_plan_id = None
+                    sub.pending_plan_change_at = None
+                    sub.provider_schedule_id = None
+                sub.status = SubscriptionStatus.canceled.value
+                sub.canceled_at = now
+                sub.ended_at = now
+                sub.cancel_at_period_end = False
+
+        await self.session.flush()
+        log.info("force_cleanup_subscriptions_done")
 
     async def create_subscription(
         self, app: App, req: CreateSubscriptionRequest
@@ -126,7 +258,7 @@ class SubscriptionService:
 
         async with get_session_ctx() as customer_session:
             customer = await self._get_or_create_customer(
-                customer_session, app, req, adapter
+                customer_session, app, req, adapter, plan.provider
             )
             customer_id = customer.id
             provider_customer_id = customer.provider_customer_id
@@ -140,6 +272,9 @@ class SubscriptionService:
         await self.session.execute(
             text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key}
         )
+
+        if req.force_cleanup:
+            await self._force_cleanup_conflicting_subscriptions(app, customer_id)
 
         incomplete_stmt = select(func.count()).where(
             Subscription.customer_id == customer_id,
@@ -249,17 +384,34 @@ class SubscriptionService:
         app_id: uuid.UUID,
         page: int = 1,
         page_size: int = 20,
+        external_user_id: str | None = None,
+        status: str | None = None,
     ) -> tuple[list[Subscription], int]:
-        count_stmt = (
-            select(func.count())
-            .select_from(Subscription)
-            .where(Subscription.app_id == app_id)
-        )
+        conditions: list = [Subscription.app_id == app_id]
+        needs_join = False
+
+        if external_user_id:
+            conditions.append(Customer.external_user_id == external_user_id)
+            needs_join = True
+
+        if status:
+            conditions.append(Subscription.status == status)
+
+        count_base = select(func.count()).select_from(Subscription)
+        if needs_join:
+            count_base = count_base.join(
+                Customer, Subscription.customer_id == Customer.id
+            )
+        count_stmt = count_base.where(*conditions)
         total = (await self.session.execute(count_stmt)).scalar_one()
 
+        base = select(Subscription)
+        if needs_join:
+            base = base.join(
+                Customer, Subscription.customer_id == Customer.id
+            )
         stmt = (
-            select(Subscription)
-            .where(Subscription.app_id == app_id)
+            base.where(*conditions)
             .order_by(Subscription.created_at.desc())
             .offset((page - 1) * page_size)
             .limit(page_size)

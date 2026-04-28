@@ -7,6 +7,7 @@ import uuid
 import traceback
 from datetime import datetime, UTC
 
+import httpx
 import stripe
 
 from gateway.core.logging import get_logger
@@ -80,6 +81,13 @@ class StripeAdapter(ProviderAdapter, SubscriptionProviderMixin):
             )
 
         stripe.api_key = self.secret_key
+        stripe.max_network_retries = 1
+        try:
+            stripe.default_http_client = stripe.HTTPXClient(
+                timeout=httpx.Timeout(connect=5.0, read=15.0, write=10.0, pool=5.0)
+            )
+        except Exception as e:
+            logger.warning("stripe_http_client_config_failed", error=str(e))
         StripeAdapter._initialized = True
 
     @property

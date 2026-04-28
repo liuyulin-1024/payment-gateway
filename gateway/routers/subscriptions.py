@@ -99,12 +99,18 @@ async def create_subscription(
 async def list_subscriptions(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
+    external_user_id: str | None = Query(default=None),
+    status: str | None = Query(default=None),
     app: App = Depends(get_app_from_api_key),
     session: AsyncSession = Depends(get_session),
 ):
     svc = SubscriptionService(session)
     subs, total = await svc.list_subscriptions(
-        app.id, page=page, page_size=page_size
+        app.id,
+        page=page,
+        page_size=page_size,
+        external_user_id=external_user_id,
+        status=status,
     )
     items = [await _build_subscription_response(s, session) for s in subs]
     return success_response(

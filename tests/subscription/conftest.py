@@ -54,6 +54,7 @@ def mock_adapter():
         subscription_id="sub_test_100",
         status="active",
     )
+    adapter.cancel_payment = AsyncMock(return_value={"status": "expired"})
     return adapter
 
 
