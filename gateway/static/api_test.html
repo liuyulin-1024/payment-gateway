@@ -242,6 +242,11 @@ body {
   color: var(--text-dim);
   font-family: monospace;
 }
+.form-row label .db-hint {
+  font-size: 10px;
+  color: var(--blue);
+  font-family: monospace;
+}
 .form-row label .required {
   color: var(--red);
   margin-left: 2px;
@@ -441,8 +446,8 @@ const ENDPOINTS = [
         id: 'create_app', method: 'POST', path: '/v1/admin/apps', name: '创建应用',
         desc: '创建新应用并生成 API Key', auth: false,
         params: [
-          { name: 'name', label: '应用名称', type: 'string', required: true, place: 'body' },
-          { name: 'notify_url', label: '默认回调地址', type: 'string', required: false, place: 'body', placeholder: 'https://example.com/callback' },
+          { name: 'name', label: '应用名称', type: 'string', required: true, place: 'body', db: 'apps.name' },
+          { name: 'notify_url', label: '默认回调地址', type: 'string', required: false, place: 'body', placeholder: 'https://example.com/callback', db: 'apps.notify_url' },
         ]
       },
       {
@@ -457,22 +462,22 @@ const ENDPOINTS = [
         id: 'get_app', method: 'GET', path: '/v1/admin/apps/{app_id}', name: '应用详情',
         desc: '根据应用 ID 获取详细信息', auth: false,
         params: [
-          { name: 'app_id', label: '应用 ID', type: 'uuid', required: true, place: 'path' },
+          { name: 'app_id', label: '应用 ID', type: 'uuid', required: true, place: 'path', db: 'apps.id' },
         ]
       },
       {
         id: 'delete_app', method: 'DELETE', path: '/v1/admin/apps/{app_id}', name: '删除应用',
         desc: '根据应用 ID 删除应用', auth: false,
         params: [
-          { name: 'app_id', label: '应用 ID', type: 'uuid', required: true, place: 'path' },
+          { name: 'app_id', label: '应用 ID', type: 'uuid', required: true, place: 'path', db: 'apps.id' },
         ]
       },
       {
         id: 'update_app_status', method: 'PATCH', path: '/v1/admin/apps/{app_id}/status', name: '更新应用状态',
         desc: '启用或禁用应用', auth: false,
         params: [
-          { name: 'app_id', label: '应用 ID', type: 'uuid', required: true, place: 'path' },
-          { name: 'is_active', label: '是否启用', type: 'boolean', required: true, place: 'query' },
+          { name: 'app_id', label: '应用 ID', type: 'uuid', required: true, place: 'path', db: 'apps.id' },
+          { name: 'is_active', label: '是否启用', type: 'boolean', required: true, place: 'query', db: 'apps.is_active' },
         ]
       },
     ]
@@ -484,26 +489,26 @@ const ENDPOINTS = [
         id: 'create_payment', method: 'POST', path: '/v1/payments', name: '创建支付',
         desc: '创建支付订单，返回支付链接或客户端密钥', auth: true,
         params: [
-          { name: 'merchant_order_no', label: '商户订单号', type: 'string', required: true, place: 'body', placeholder: 'ORDER_001' },
-          { name: 'provider', label: '支付渠道', type: 'enum', required: true, place: 'body', options: ['stripe'] },
-          { name: 'currency', label: '币种', type: 'enum', required: true, place: 'body', options: ['USD','CNY','HKD','KRW','THB','EUR','GBP','JPY','INR'] },
+          { name: 'merchant_order_no', label: '商户订单号', type: 'string', required: true, place: 'body', placeholder: 'ORDER_001', db: 'payments.merchant_order_no' },
+          { name: 'provider', label: '支付渠道', type: 'enum', required: true, place: 'body', options: ['stripe'], db: 'payments.provider' },
+          { name: 'currency', label: '币种', type: 'enum', required: true, place: 'body', options: ['USD','CNY','HKD','KRW','THB','EUR','GBP','JPY','INR'], db: 'payments.currency' },
           { name: 'quantity', label: '商品数量', type: 'integer', required: true, place: 'body', default: '1' },
-          { name: 'unit_amount', label: '单价 (最小货币单位)', type: 'integer', required: false, place: 'body', placeholder: '1000 = $10.00' },
+          { name: 'unit_amount', label: '单价 (最小货币单位)', type: 'integer', required: false, place: 'body', placeholder: '1000 = $10.00', db: 'payments.amount (quantity*unit_amount)' },
           { name: 'product_name', label: '商品名称', type: 'string', required: false, place: 'body' },
           { name: 'product_desc', label: '商品描述', type: 'string', required: false, place: 'body' },
-          { name: 'notify_url', label: '回调地址', type: 'string', required: false, place: 'body' },
+          { name: 'notify_url', label: '回调地址', type: 'string', required: false, place: 'body', db: 'payments.notify_url' },
           { name: 'expire_minutes', label: '过期时间 (分钟)', type: 'integer', required: false, place: 'body' },
           { name: 'success_url', label: '成功跳转 URL', type: 'string', required: false, place: 'body', placeholder: 'https://example.com/success' },
           { name: 'cancel_url', label: '取消跳转 URL', type: 'string', required: false, place: 'body', placeholder: 'https://example.com/cancel' },
           { name: 'metadata', label: '元数据 (JSON)', type: 'json', required: false, place: 'body', placeholder: '{"key": "value"}' },
-          { name: 'external_user_id', label: '用户标识', type: 'string', required: false, place: 'body' },
+          { name: 'external_user_id', label: '用户标识', type: 'string', required: false, place: 'body', db: 'payments.external_user_id' },
         ]
       },
       {
         id: 'get_payment', method: 'GET', path: '/v1/payments/{payment_id}', name: '查询支付详情',
         desc: '根据支付 ID 查询支付详细信息', auth: true,
         params: [
-          { name: 'payment_id', label: '支付 ID', type: 'uuid', required: true, place: 'path' },
+          { name: 'payment_id', label: '支付 ID', type: 'uuid', required: true, place: 'path', db: 'payments.id' },
         ]
       },
       {
@@ -512,22 +517,22 @@ const ENDPOINTS = [
         params: [
           { name: 'page', label: '页码', type: 'integer', required: false, place: 'query', default: '1' },
           { name: 'page_size', label: '每页数量', type: 'integer', required: false, place: 'query', default: '20' },
-          { name: 'status', label: '支付状态', type: 'enum', required: false, place: 'query', options: ['', 'pending','succeeded','failed','canceled'] },
+          { name: 'status', label: '支付状态', type: 'enum', required: false, place: 'query', options: ['', 'pending','succeeded','failed','canceled'], db: 'payments.status' },
         ]
       },
       {
         id: 'cancel_payment', method: 'POST', path: '/v1/payments/cancel', name: '取消支付',
         desc: '取消待支付状态的订单', auth: true,
         params: [
-          { name: 'merchant_order_no', label: '商户订单号', type: 'string', required: true, place: 'body' },
-          { name: 'payment_id', label: '支付 ID', type: 'uuid', required: true, place: 'body' },
+          { name: 'merchant_order_no', label: '商户订单号', type: 'string', required: true, place: 'body', db: 'payments.merchant_order_no' },
+          { name: 'payment_id', label: '支付 ID', type: 'uuid', required: true, place: 'body', db: 'payments.id' },
         ]
       },
       {
         id: 'get_payment_by_order', method: 'GET', path: '/v1/payments/order/{merchant_order_no}', name: '按订单号查询',
         desc: '通过商户订单号查询支付信息', auth: true,
         params: [
-          { name: 'merchant_order_no', label: '商户订单号', type: 'string', required: true, place: 'path' },
+          { name: 'merchant_order_no', label: '商户订单号', type: 'string', required: true, place: 'path', db: 'payments.merchant_order_no' },
         ]
       },
     ]
@@ -539,32 +544,32 @@ const ENDPOINTS = [
         id: 'test_success', method: 'POST', path: '/v1/admin/payments/{payment_id}/test-success', name: '模拟支付成功',
         desc: '测试用：直接模拟支付成功并触发回调流程', auth: false,
         params: [
-          { name: 'payment_id', label: '支付 ID', type: 'uuid', required: true, place: 'path' },
-          { name: 'provider', label: '支付渠道', type: 'enum', required: true, place: 'body', options: ['stripe'] },
+          { name: 'payment_id', label: '支付 ID', type: 'uuid', required: true, place: 'path', db: 'payments.id' },
+          { name: 'provider', label: '支付渠道', type: 'enum', required: true, place: 'body', options: ['stripe'], db: 'payments.provider' },
         ]
       },
       {
         id: 'create_refund', method: 'POST', path: '/v1/admin/refunds', name: '创建退款',
         desc: '创建退款请求 (支持全额和部分退款)', auth: false,
         params: [
-          { name: 'payment_id', label: '支付 ID', type: 'uuid', required: true, place: 'body' },
-          { name: 'refund_amount', label: '退款金额 (最小货币单位)', type: 'integer', required: false, place: 'body', placeholder: '不填则全额退款' },
-          { name: 'reason', label: '退款原因', type: 'string', required: false, place: 'body' },
-          { name: 'notify_url', label: '退款回调地址', type: 'string', required: false, place: 'body' },
+          { name: 'payment_id', label: '支付 ID', type: 'uuid', required: true, place: 'body', db: 'refunds.payment_id' },
+          { name: 'refund_amount', label: '退款金额 (最小货币单位)', type: 'integer', required: false, place: 'body', placeholder: '不填则全额退款', db: 'refunds.refund_amount' },
+          { name: 'reason', label: '退款原因', type: 'string', required: false, place: 'body', db: 'refunds.reason' },
+          { name: 'notify_url', label: '退款回调地址', type: 'string', required: false, place: 'body', db: 'refunds.notify_url' },
         ]
       },
       {
         id: 'get_refund', method: 'GET', path: '/v1/admin/refunds/{refund_id}', name: '查询退款详情',
         desc: '根据退款 ID 获取退款详细信息', auth: false,
         params: [
-          { name: 'refund_id', label: '退款 ID', type: 'uuid', required: true, place: 'path' },
+          { name: 'refund_id', label: '退款 ID', type: 'uuid', required: true, place: 'path', db: 'refunds.id' },
         ]
       },
       {
         id: 'list_refunds', method: 'GET', path: '/v1/admin/payments/{payment_id}/refunds', name: '查询退款列表',
         desc: '获取指定支付的所有退款记录', auth: false,
         params: [
-          { name: 'payment_id', label: '支付 ID', type: 'uuid', required: true, place: 'path' },
+          { name: 'payment_id', label: '支付 ID', type: 'uuid', required: true, place: 'path', db: 'refunds.payment_id' },
           { name: 'skip', label: '跳过记录数', type: 'integer', required: false, place: 'query', default: '0' },
           { name: 'limit', label: '最大记录数', type: 'integer', required: false, place: 'query', default: '100' },
         ]
@@ -573,7 +578,7 @@ const ENDPOINTS = [
         id: 'sync_refund', method: 'POST', path: '/v1/admin/refunds/{refund_id}/sync', name: '同步退款状态',
         desc: '从支付渠道同步最新退款状态', auth: false,
         params: [
-          { name: 'refund_id', label: '退款 ID', type: 'uuid', required: true, place: 'path' },
+          { name: 'refund_id', label: '退款 ID', type: 'uuid', required: true, place: 'path', db: 'refunds.id' },
         ]
       },
     ]
@@ -585,16 +590,16 @@ const ENDPOINTS = [
         id: 'create_plan', method: 'POST', path: '/v1/plans', name: '创建计划',
         desc: '创建新的订阅计划', auth: true,
         params: [
-          { name: 'provider', label: '支付渠道', type: 'enum', required: true, place: 'body', options: ['stripe'] },
-          { name: 'slug', label: '计划标识 (slug)', type: 'string', required: true, place: 'body', placeholder: 'pro-monthly' },
-          { name: 'name', label: '计划名称', type: 'string', required: true, place: 'body', placeholder: 'Pro 月付' },
-          { name: 'description', label: '描述', type: 'string', required: false, place: 'body' },
-          { name: 'amount', label: '金额 (最小货币单位)', type: 'integer', required: true, place: 'body', placeholder: '1990 = $19.90' },
-          { name: 'currency', label: '币种', type: 'enum', required: true, place: 'body', options: ['USD','CNY','HKD','KRW','THB','EUR','GBP','JPY','INR'] },
-          { name: 'interval', label: '计费周期', type: 'enum', required: true, place: 'body', options: ['week','month','quarter','year'] },
-          { name: 'interval_count', label: '周期倍数', type: 'integer', required: false, place: 'body', default: '1' },
-          { name: 'tier', label: '层级', type: 'integer', required: false, place: 'body', default: '0' },
-          { name: 'features', label: '功能特性 (JSON)', type: 'json', required: false, place: 'body', placeholder: '{"max_users": 10}' },
+          { name: 'provider', label: '支付渠道', type: 'enum', required: true, place: 'body', options: ['stripe'], db: 'plans.provider' },
+          { name: 'slug', label: '计划标识 (slug)', type: 'string', required: true, place: 'body', placeholder: 'pro-monthly', db: 'plans.slug' },
+          { name: 'name', label: '计划名称', type: 'string', required: true, place: 'body', placeholder: 'Pro 月付', db: 'plans.name' },
+          { name: 'description', label: '描述', type: 'string', required: false, place: 'body', db: 'plans.description' },
+          { name: 'amount', label: '金额 (最小货币单位)', type: 'integer', required: true, place: 'body', placeholder: '1990 = $19.90', db: 'plans.amount' },
+          { name: 'currency', label: '币种', type: 'enum', required: true, place: 'body', options: ['USD','CNY','HKD','KRW','THB','EUR','GBP','JPY','INR'], db: 'plans.currency' },
+          { name: 'interval', label: '计费周期', type: 'enum', required: true, place: 'body', options: ['week','month','quarter','year'], db: 'plans.interval' },
+          { name: 'interval_count', label: '周期倍数', type: 'integer', required: false, place: 'body', default: '1', db: 'plans.interval_count' },
+          { name: 'tier', label: '层级', type: 'integer', required: false, place: 'body', default: '0', db: 'plans.tier' },
+          { name: 'features', label: '功能特性 (JSON)', type: 'json', required: false, place: 'body', placeholder: '{"max_users": 10}', db: 'plans.features' },
         ]
       },
       {
@@ -609,27 +614,27 @@ const ENDPOINTS = [
         id: 'get_plan', method: 'GET', path: '/v1/plans/{plan_id}', name: '计划详情',
         desc: '根据计划 ID 查询详情', auth: true,
         params: [
-          { name: 'plan_id', label: '计划 ID', type: 'uuid', required: true, place: 'path' },
+          { name: 'plan_id', label: '计划 ID', type: 'uuid', required: true, place: 'path', db: 'plans.id' },
         ]
       },
       {
         id: 'update_plan', method: 'PUT', path: '/v1/plans/{plan_id}', name: '更新计划',
         desc: '更新订阅计划的属性', auth: true,
         params: [
-          { name: 'plan_id', label: '计划 ID', type: 'uuid', required: true, place: 'path' },
-          { name: 'name', label: '计划名称', type: 'string', required: false, place: 'body' },
-          { name: 'description', label: '描述', type: 'string', required: false, place: 'body' },
-          { name: 'amount', label: '金额', type: 'integer', required: false, place: 'body' },
-          { name: 'tier', label: '层级', type: 'integer', required: false, place: 'body' },
-          { name: 'features', label: '功能特性 (JSON)', type: 'json', required: false, place: 'body' },
-          { name: 'is_active', label: '是否启用', type: 'boolean', required: false, place: 'body' },
+          { name: 'plan_id', label: '计划 ID', type: 'uuid', required: true, place: 'path', db: 'plans.id' },
+          { name: 'name', label: '计划名称', type: 'string', required: false, place: 'body', db: 'plans.name' },
+          { name: 'description', label: '描述', type: 'string', required: false, place: 'body', db: 'plans.description' },
+          { name: 'amount', label: '金额', type: 'integer', required: false, place: 'body', db: 'plans.amount' },
+          { name: 'tier', label: '层级', type: 'integer', required: false, place: 'body', db: 'plans.tier' },
+          { name: 'features', label: '功能特性 (JSON)', type: 'json', required: false, place: 'body', db: 'plans.features' },
+          { name: 'is_active', label: '是否启用', type: 'boolean', required: false, place: 'body', db: 'plans.is_active' },
         ]
       },
       {
         id: 'deactivate_plan', method: 'DELETE', path: '/v1/plans/{plan_id}', name: '停用计划',
         desc: '停用指定的订阅计划', auth: true,
         params: [
-          { name: 'plan_id', label: '计划 ID', type: 'uuid', required: true, place: 'path' },
+          { name: 'plan_id', label: '计划 ID', type: 'uuid', required: true, place: 'path', db: 'plans.id' },
         ]
       },
     ]
@@ -641,14 +646,14 @@ const ENDPOINTS = [
         id: 'create_subscription', method: 'POST', path: '/v1/subscriptions', name: '创建订阅',
         desc: '创建新订阅，返回 Checkout URL', auth: true,
         params: [
-          { name: 'external_user_id', label: '用户标识', type: 'string', required: true, place: 'body' },
-          { name: 'plan_id', label: '计划 ID', type: 'uuid', required: true, place: 'body' },
-          { name: 'email', label: '用户邮箱', type: 'string', required: false, place: 'body' },
+          { name: 'external_user_id', label: '用户标识', type: 'string', required: true, place: 'body', db: 'customers.external_user_id' },
+          { name: 'plan_id', label: '计划 ID', type: 'uuid', required: true, place: 'body', db: 'subscriptions.plan_id' },
+          { name: 'email', label: '用户邮箱', type: 'string', required: false, place: 'body', db: 'customers.email' },
           { name: 'success_url', label: '成功跳转 URL', type: 'string', required: true, place: 'body', placeholder: 'https://example.com/success' },
           { name: 'cancel_url', label: '取消跳转 URL', type: 'string', required: true, place: 'body', placeholder: 'https://example.com/cancel' },
-          { name: 'notify_url', label: '回调地址', type: 'string', required: false, place: 'body' },
+          { name: 'notify_url', label: '回调地址', type: 'string', required: false, place: 'body', db: 'subscriptions.notify_url' },
           { name: 'trial_period_days', label: '试用期天数', type: 'integer', required: false, place: 'body' },
-          { name: 'metadata', label: '元数据 (JSON)', type: 'json', required: false, place: 'body' },
+          { name: 'metadata', label: '元数据 (JSON)', type: 'json', required: false, place: 'body', db: 'subscriptions.metadata' },
         ]
       },
       {
@@ -663,21 +668,21 @@ const ENDPOINTS = [
         id: 'get_subscription_by_user', method: 'GET', path: '/v1/subscriptions/user/{external_user_id}', name: '按用户查询订阅',
         desc: '根据用户标识查询订阅', auth: true,
         params: [
-          { name: 'external_user_id', label: '用户标识', type: 'string', required: true, place: 'path' },
+          { name: 'external_user_id', label: '用户标识', type: 'string', required: true, place: 'path', db: 'customers.external_user_id' },
         ]
       },
       {
         id: 'get_subscription', method: 'GET', path: '/v1/subscriptions/{subscription_id}', name: '订阅详情',
         desc: '根据订阅 ID 查询详情', auth: true,
         params: [
-          { name: 'subscription_id', label: '订阅 ID', type: 'uuid', required: true, place: 'path' },
+          { name: 'subscription_id', label: '订阅 ID', type: 'uuid', required: true, place: 'path', db: 'subscriptions.id' },
         ]
       },
       {
         id: 'cancel_subscription', method: 'POST', path: '/v1/subscriptions/{subscription_id}/cancel', name: '取消订阅',
         desc: '取消订阅 (可选立即或到期后取消)', auth: true,
         params: [
-          { name: 'subscription_id', label: '订阅 ID', type: 'uuid', required: true, place: 'path' },
+          { name: 'subscription_id', label: '订阅 ID', type: 'uuid', required: true, place: 'path', db: 'subscriptions.id' },
           { name: 'immediate', label: '立即取消', type: 'boolean', required: false, place: 'body', default: 'false' },
         ]
       },
@@ -685,29 +690,29 @@ const ENDPOINTS = [
         id: 'resume_subscription', method: 'POST', path: '/v1/subscriptions/{subscription_id}/resume', name: '恢复订阅',
         desc: '恢复已取消的订阅', auth: true,
         params: [
-          { name: 'subscription_id', label: '订阅 ID', type: 'uuid', required: true, place: 'path' },
+          { name: 'subscription_id', label: '订阅 ID', type: 'uuid', required: true, place: 'path', db: 'subscriptions.id' },
         ]
       },
       {
         id: 'pause_subscription', method: 'POST', path: '/v1/subscriptions/{subscription_id}/pause', name: '暂停订阅',
         desc: '暂停活跃的订阅', auth: true,
         params: [
-          { name: 'subscription_id', label: '订阅 ID', type: 'uuid', required: true, place: 'path' },
+          { name: 'subscription_id', label: '订阅 ID', type: 'uuid', required: true, place: 'path', db: 'subscriptions.id' },
         ]
       },
       {
         id: 'unpause_subscription', method: 'POST', path: '/v1/subscriptions/{subscription_id}/unpause', name: '恢复暂停的订阅',
         desc: '恢复暂停状态的订阅', auth: true,
         params: [
-          { name: 'subscription_id', label: '订阅 ID', type: 'uuid', required: true, place: 'path' },
+          { name: 'subscription_id', label: '订阅 ID', type: 'uuid', required: true, place: 'path', db: 'subscriptions.id' },
         ]
       },
       {
         id: 'change_plan', method: 'POST', path: '/v1/subscriptions/{subscription_id}/change-plan', name: '变更计划',
         desc: '变更订阅的计划 (升降级)', auth: true,
         params: [
-          { name: 'subscription_id', label: '订阅 ID', type: 'uuid', required: true, place: 'path' },
-          { name: 'new_plan_id', label: '新计划 ID', type: 'uuid', required: true, place: 'body' },
+          { name: 'subscription_id', label: '订阅 ID', type: 'uuid', required: true, place: 'path', db: 'subscriptions.id' },
+          { name: 'new_plan_id', label: '新计划 ID', type: 'uuid', required: true, place: 'body', db: 'subscriptions.pending_plan_id' },
           { name: 'proration_mode', label: '按比例计费模式', type: 'enum', required: false, place: 'body', options: ['', 'auto', 'custom'] },
           { name: 'credit_amount', label: '抵扣金额', type: 'integer', required: false, place: 'body' },
         ]
@@ -716,7 +721,7 @@ const ENDPOINTS = [
         id: 'cancel_pending_change', method: 'POST', path: '/v1/subscriptions/{subscription_id}/cancel-pending-change', name: '取消待变更',
         desc: '取消计划变更 (降级预约)', auth: true,
         params: [
-          { name: 'subscription_id', label: '订阅 ID', type: 'uuid', required: true, place: 'path' },
+          { name: 'subscription_id', label: '订阅 ID', type: 'uuid', required: true, place: 'path', db: 'subscriptions.id' },
         ]
       },
     ]
@@ -818,6 +823,7 @@ function renderForm(ep) {
 function renderField(p) {
   const req = p.required ? '<span class="required">*</span>' : '';
   const typeHint = p.type === 'json' ? 'JSON Object' : p.type;
+  const dbHint = p.db ? `<span class="db-hint">DB: ${p.db}</span>` : '';
   let inputHtml = '';
 
   if (p.type === 'enum') {
@@ -841,7 +847,7 @@ function renderField(p) {
   }
 
   return `<div class="form-row">
-    <label>${p.label}${req}<span class="type-hint">${typeHint}</span></label>
+    <label>${p.label}${req}<span class="type-hint">${typeHint}</span>${dbHint}</label>
     ${inputHtml}
   </div>`;
 }
